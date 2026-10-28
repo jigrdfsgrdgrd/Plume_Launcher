@@ -283,4 +283,8 @@
     <string name="font_rounded">Rounded (Soft)</string>
     <string name="font_serif">Serif (Editorial)</string>
     <string name="font_condensed">Condensed (Compact)</string>
+    <string name="now_playing_dock">Live Activity Layout</string>
+    <string name="dock_replace">Dock ersetzen (Apple Clean)</string>
+    <string name="dock_above">Über Dock anzeigen</string>
+    <string name="dock_off">Aus</string>
 </resources>

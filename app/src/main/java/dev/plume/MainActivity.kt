@@ -1,6 +1,7 @@
 package dev.plume
 import android.view.ViewOutlineProvider
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.LinearInterpolator
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -863,19 +864,30 @@ class MainActivity : Activity() {
         val fg = findViewById<ImageView>(R.id.mountainForeground) ?: return
         if (settingsScrim.visibility == View.VISIBLE || allApps.visibility == View.VISIBLE) return
 
-        wp.animate().scaleX(1.03f).scaleY(1.03f).setDuration(800).start()
-        fg.animate().scaleX(1.03f).scaleY(1.03f).setDuration(800).start()
+        // Gentle scale so the smooth orbit never shows borders
+        wp.animate().scaleX(1.035f).scaleY(1.035f).setDuration(1200).start()
+        fg.animate().scaleX(1.035f).scaleY(1.035f).setDuration(1200).start()
 
-        val maxDrift = dp(12).toFloat()
+        val maxDriftX = dp(8).toFloat()
+        val maxDriftY = dp(4).toFloat()
+
         driftAnimator?.cancel()
-        driftAnimator = ValueAnimator.ofFloat(0f, 1f, -1f, 0f).apply {
-            duration = 38_000L
+        // Continuous, seamless 2D elliptical orbit over 110 seconds!
+        // No directional stops or abrupt reversals: velocity magnitude is never 0 in 2D space.
+        driftAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 110_000L
             repeatCount = ValueAnimator.INFINITE
-            interpolator = AccelerateDecelerateInterpolator()
+            interpolator = LinearInterpolator()
             addUpdateListener { anim ->
-                val f = anim.animatedValue as Float
-                wp.translationX = f * maxDrift
-                fg.translationX = f * maxDrift * 1.4f
+                val p = anim.animatedValue as Float
+                val angle = (p * 2.0 * Math.PI)
+                val dx = Math.sin(angle).toFloat() * maxDriftX
+                val dy = Math.cos(angle).toFloat() * maxDriftY
+
+                wp.translationX = dx
+                wp.translationY = dy * 0.7f
+                fg.translationX = dx * 1.45f
+                fg.translationY = dy * 0.7f * 1.45f
             }
             start()
         }
@@ -886,8 +898,8 @@ class MainActivity : Activity() {
         if (driftAnimator != null) {
             driftAnimator?.cancel()
             driftAnimator = null
-            findViewById<ImageView>(R.id.wallpaper)?.animate()?.translationX(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(250)?.start()
-            findViewById<ImageView>(R.id.mountainForeground)?.animate()?.translationX(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(250)?.start()
+            findViewById<ImageView>(R.id.wallpaper)?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(300)?.start()
+            findViewById<ImageView>(R.id.mountainForeground)?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(300)?.start()
         }
         val rawWp = currentWallpaper()
         val curWp = resolveDynamicWallpaper(rawWp)
@@ -897,20 +909,78 @@ class MainActivity : Activity() {
         }
     }
 
+    private var eqAnimator: ValueAnimator? = null
+    private var appsExplicitlyShown = false
+
+    private fun startEqAnimation(isPlaying: Boolean) {
+        val bar1 = findViewById<View>(R.id.eqBar1) ?: return
+        val bar2 = findViewById<View>(R.id.eqBar2) ?: return
+        val bar3 = findViewById<View>(R.id.eqBar3) ?: return
+        eqAnimator?.cancel()
+        if (!isPlaying) {
+            bar1.layoutParams = bar1.layoutParams.apply { height = dp(4) }
+            bar2.layoutParams = bar2.layoutParams.apply { height = dp(4) }
+            bar3.layoutParams = bar3.layoutParams.apply { height = dp(4) }
+            return
+        }
+        val minH = dp(4).toFloat()
+        val maxH1 = dp(14).toFloat()
+        val maxH2 = dp(20).toFloat()
+        val maxH3 = dp(12).toFloat()
+
+        eqAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1200L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                val p = anim.animatedValue as Float
+                val h1 = minH + (maxH1 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 2.0).toFloat())
+                val h2 = minH + (maxH2 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 3.0 + 1.2).toFloat())
+                val h3 = minH + (maxH3 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 2.5 + 2.4).toFloat())
+                bar1.layoutParams = bar1.layoutParams.apply { height = h1.toInt() }
+                bar2.layoutParams = bar2.layoutParams.apply { height = h2.toInt() }
+                bar3.layoutParams = bar3.layoutParams.apply { height = h3.toInt() }
+            }
+            start()
+        }
+    }
+
+    private fun launchMediaApp(track: MediaTrackInfo?) {
+        if (track == null) return
+        try {
+            track.controller?.sessionActivity?.send()
+        } catch (e: Exception) {
+            val pkg = track.packageName
+            if (pkg.isNotEmpty()) {
+                val intent = packageManager.getLeanbackLaunchIntentForPackage(pkg)
+                    ?: packageManager.getLaunchIntentForPackage(pkg)
+                intent?.let { startActivity(it) }
+            }
+        }
+    }
+
     private fun initNowPlayingPill() {
         val pill = findViewById<LinearLayout>(R.id.nowPlayingPill) ?: return
         pill.setOnClickListener {
             val track = MediaBridge.currentTrack ?: return@setOnClickListener
-            try {
-                track.controller?.sessionActivity?.send()
-            } catch (e: Exception) {
-                val pkg = track.packageName
-                if (pkg.isNotEmpty()) {
-                    val intent = packageManager.getLeanbackLaunchIntentForPackage(pkg)
-                        ?: packageManager.getLaunchIntentForPackage(pkg)
-                    intent?.let { startActivity(it) }
-                }
-            }
+            // Toggle play/pause on simple click
+            if (track.isPlaying) track.controller?.transportControls?.pause()
+            else track.controller?.transportControls?.play()
+        }
+        pill.setOnLongClickListener {
+            launchMediaApp(MediaBridge.currentTrack)
+            true
+        }
+        findViewById<View>(R.id.nowPlayingArt)?.setOnClickListener {
+            launchMediaApp(MediaBridge.currentTrack)
+        }
+        findViewById<View>(R.id.nowPlayingPlayPause)?.setOnClickListener {
+            val track = MediaBridge.currentTrack ?: return@setOnClickListener
+            if (track.isPlaying) track.controller?.transportControls?.pause()
+            else track.controller?.transportControls?.play()
+        }
+        findViewById<View>(R.id.nowPlayingNext)?.setOnClickListener {
+            MediaBridge.currentTrack?.controller?.transportControls?.skipToNext()
         }
         pill.setOnFocusChangeListener { v, hasFocus ->
             v.animate().scaleX(if (hasFocus) 1.05f else 1f).scaleY(if (hasFocus) 1.05f else 1f).setDuration(150).start()
@@ -923,27 +993,57 @@ class MainActivity : Activity() {
 
     private fun updateNowPlayingPill(track: MediaTrackInfo?) {
         val pill = findViewById<LinearLayout>(R.id.nowPlayingPill) ?: return
-        val isLiveEnabled = prefs.getBoolean("live_activity", true)
         val rawWp = currentWallpaper()
         val curWp = resolveDynamicWallpaper(rawWp)
         val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
+        val dockMode = prefs.getString("now_playing_dock", "replace") // "replace", "above", "off"
 
-        if (!isLiveEnabled || !isApple || track == null || track.title.isEmpty()) {
+        if (dockMode == "off" || !isApple || track == null || track.title.isEmpty()) {
             if (pill.visibility != View.GONE) {
                 pill.animate().alpha(0f).translationY(dp(8).toFloat()).setDuration(250).withEndAction {
                     pill.visibility = View.GONE
                 }.start()
             }
+            startEqAnimation(false)
+            appsExplicitlyShown = false
+            appScroll.visibility = View.VISIBLE
+            placeRow(animate = true)
             return
         }
 
+        // Hide Continue Watching while media is playing to keep screen clean
+        watchTitle.visibility = View.GONE
+        watchScroll.visibility = View.GONE
+
+        // Dock replacement mode
+        if (dockMode == "replace" && !appsExplicitlyShown) {
+            appScroll.visibility = View.GONE
+        } else {
+            appScroll.visibility = View.VISIBLE
+        }
+
         findViewById<TextView>(R.id.nowPlayingTitle)?.text = track.title
-        findViewById<TextView>(R.id.nowPlayingArtist)?.text = if (track.artist.isNotEmpty()) track.artist else track.packageName
+        val artistView = findViewById<TextView>(R.id.nowPlayingArtist)
+        val isSpotify = track.packageName.contains("spotify", ignoreCase = true)
+        val appName = if (isSpotify) "Spotify" else if (track.packageName.contains("youtube", ignoreCase = true)) "YouTube" else ""
+        val subtitle = listOfNotNull(appName.takeIf { it.isNotEmpty() }, track.artist.takeIf { it.isNotEmpty() }).joinToString(" · ")
+        artistView?.text = if (subtitle.isNotEmpty()) subtitle else track.packageName
+
+        val appIcon = findViewById<ImageView>(R.id.nowPlayingAppIcon)
+        if (appIcon != null) {
+            if (isSpotify) {
+                appIcon.setImageResource(R.drawable.logo_spotify)
+                appIcon.visibility = View.VISIBLE
+            } else {
+                appIcon.visibility = View.GONE
+            }
+        }
+
         val artView = findViewById<ImageView>(R.id.nowPlayingArt)
         if (artView != null) {
             artView.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(6).toFloat())
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
                 }
             }
             artView.clipToOutline = true
@@ -957,8 +1057,11 @@ class MainActivity : Activity() {
                 }
             }
         }
-        val badge = findViewById<TextView>(R.id.nowPlayingBadge)
-        badge?.text = if (track.isPlaying) "♫" else "❙❙"
+
+        val playPauseBtn = findViewById<ImageView>(R.id.nowPlayingPlayPause)
+        playPauseBtn?.setImageResource(if (track.isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+
+        startEqAnimation(track.isPlaying)
 
         if (pill.visibility != View.VISIBLE) {
             pill.alpha = 0f
@@ -1697,7 +1800,8 @@ class MainActivity : Activity() {
         val sort = prefs.getString("sort", "manual")!!
         val clockFont = prefs.getString("clock_font", "bold")!!
         val ambientDrift = prefs.getBoolean("ambient_drift", true)
-        val liveActivity = prefs.getBoolean("live_activity", true)
+        val dockMode = prefs.getString("now_playing_dock", "replace")!!
+        val dockModeNames = mapOf("replace" to getString(R.string.dock_replace), "above" to getString(R.string.dock_above), "off" to getString(R.string.dock_off))
         val fontNames = mapOf("bold" to getString(R.string.font_bold), "rounded" to getString(R.string.font_rounded), "serif" to getString(R.string.font_serif), "condensed" to getString(R.string.font_condensed))
         val hidden = prefs.getStringSet("hidden_watch", emptySet())!!.size
         val weather = prefs.getString("weather", "off")!!
@@ -1759,11 +1863,12 @@ class MainActivity : Activity() {
                 resetParallaxDrift()
                 renderSettings(R.string.ambient_drift)
             },
-            R.string.live_activity to { _ ->
-                val next = !prefs.getBoolean("live_activity", true)
-                prefs.edit().putBoolean("live_activity", next).apply()
+            R.string.now_playing_dock to { d ->
+                val order = listOf("replace", "above", "off")
+                val next = order[(order.indexOf(dockMode) + d).mod(order.size)]
+                prefs.edit().putString("now_playing_dock", next).apply()
                 updateNowPlayingPill(MediaBridge.currentTrack)
-                renderSettings(R.string.live_activity)
+                renderSettings(R.string.now_playing_dock)
             },
         )
         val rows = linkedMapOf<Int, Triple<String, String, () -> Unit>>(
@@ -1783,8 +1888,8 @@ class MainActivity : Activity() {
             R.string.ambient_drift to Triple(getString(R.string.ambient_drift), toggle(ambientDrift)) {
                 steps[R.string.ambient_drift]!!(1)
             },
-            R.string.live_activity to Triple(getString(R.string.live_activity), toggle(liveActivity)) {
-                steps[R.string.live_activity]!!(1)
+            R.string.now_playing_dock to Triple(getString(R.string.now_playing_dock), dockModeNames[dockMode] ?: getString(R.string.dock_replace)) {
+                steps[R.string.now_playing_dock]!!(1)
             },
             // Select steps up like Right, and past 100% starts again at 0%.
             R.string.fade_top to Triple(getString(R.string.fade_top), "$SLIDER${fade("fade_top")}") { steps[R.string.fade_top]!!(if (fade("fade_top") == 100) -100 / FADE_STEP else 1) },
@@ -1882,7 +1987,7 @@ class MainActivity : Activity() {
         val sections = listOf(
             Triple(R.string.section_appearance, "${rows[R.string.theme]!!.second} · ${wallpaperName(currentWallpaper(dark))}",
                 listOfNotNull(R.string.theme, R.string.light_wallpaper, R.string.dark_wallpaper,
-                    R.string.clock_font, R.string.ambient_drift, R.string.live_activity,
+                    R.string.clock_font, R.string.ambient_drift, R.string.now_playing_dock,
                     R.string.fade_top.takeIf { photo },
                     R.string.fade_bottom.takeIf { photo }, R.string.glass,
                     R.string.folder_photo_changes.takeIf { folder })),
@@ -2968,12 +3073,22 @@ class MainActivity : Activity() {
         return when {
             v.id == R.id.nowPlayingPill -> when (key) {
                 KeyEvent.KEYCODE_DPAD_UP -> top
-                KeyEvent.KEYCODE_DPAD_DOWN -> cards ?: apps ?: v
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> v
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    // Reveal apps when pressing Down from the Live Activity player!
+                    appsExplicitlyShown = true
+                    appScroll.visibility = View.VISIBLE
+                    apps ?: v
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    // Quick skip next track on remote right arrow
+                    MediaBridge.currentTrack?.controller?.transportControls?.skipToNext()
+                    v
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> v
                 else -> null
             }
             v.parent === wifi.parent -> when (key) { // top bar
-                KeyEvent.KEYCODE_DPAD_DOWN -> pill ?: cards ?: apps ?: v
+                KeyEvent.KEYCODE_DPAD_DOWN -> pill ?: (if (appScroll.visibility == View.VISIBLE) apps else null) ?: cards ?: v
                 KeyEvent.KEYCODE_DPAD_UP -> v
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.presetButton) v else null
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (v.id == R.id.launcherSettings) v else null
