@@ -89,7 +89,18 @@
             </intent-filter>
         </service>
 
-        <!-- Google TV's launcher must stay enabled; this service replaces it on screen whenever it shows. -->
+        <!-- Live Activity media session listener -->
+        <service
+            android:name=".MediaListenerService"
+            android:label="Plume Media Listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+                <!-- Google TV's launcher must stay enabled; this service replaces it on screen whenever it shows. -->
         <service
             android:name=".HomeOverride"
             android:directBootAware="true"

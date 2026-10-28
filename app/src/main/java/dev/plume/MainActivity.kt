@@ -1,4 +1,6 @@
 package dev.plume
+import android.view.ViewOutlineProvider
+import android.view.animation.AccelerateDecelerateInterpolator
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -407,11 +409,16 @@ class MainActivity : Activity() {
         if (checkSelfPermission(TV_LISTINGS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(TV_LISTINGS), 1)
         }
+        initNowPlayingPill()
+        resetParallaxDrift()
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
+        resetParallaxDrift()
+        ui.removeCallbacks(minuteTick)
+        ui.post(minuteTick)
         ensureHomeService()
         homeSetupResumed()
         if (wantDark() != dark) {
@@ -463,6 +470,9 @@ class MainActivity : Activity() {
         ui.removeCallbacks(weatherTick)
         ui.removeCallbacks(themeTick)
         ui.removeCallbacks(wallpaperTick)
+        ui.removeCallbacks(minuteTick)
+        idleHandler.removeCallbacks(idleRunnable)
+        driftAnimator?.cancel()
         if (editing) endEdit()
         super.onPause()
     }
@@ -815,6 +825,149 @@ class MainActivity : Activity() {
     private fun topIcons() = listOf(R.id.presetButton, R.id.wifi, R.id.sourcesButton, R.id.allAppsButton, R.id.systemSettings, R.id.launcherSettings)
         .map { findViewById<ImageView>(it) }
 
+    private fun isDaytime(): Boolean {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        return hour in 7..18
+    }
+
+    private fun resolveDynamicWallpaper(choice: String): String {
+        return if (choice == "auto:apple") {
+            if (isDaytime()) "res:Apple Day" else "res:Apple Dusk"
+        } else choice
+    }
+
+    private var driftAnimator: ValueAnimator? = null
+    private val idleHandler = Handler(Looper.getMainLooper())
+    private val idleRunnable = Runnable { startParallaxDrift() }
+    private var lastDynamicIsDay: Boolean? = null
+
+    private val minuteTick = object : Runnable {
+        override fun run() {
+            if (currentWallpaper() == "auto:apple") {
+                val nowDay = isDaytime()
+                if (lastDynamicIsDay != null && lastDynamicIsDay != nowDay) {
+                    loadWallpaper()
+                }
+                lastDynamicIsDay = nowDay
+            }
+            ui.postDelayed(this, 60_000L)
+        }
+    }
+
+    private fun startParallaxDrift() {
+        val rawWp = currentWallpaper()
+        val curWp = resolveDynamicWallpaper(rawWp)
+        val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
+        if (!isApple || !prefs.getBoolean("ambient_drift", true)) return
+        val wp = findViewById<ImageView>(R.id.wallpaper) ?: return
+        val fg = findViewById<ImageView>(R.id.mountainForeground) ?: return
+        if (settingsScrim.visibility == View.VISIBLE || allApps.visibility == View.VISIBLE) return
+
+        wp.animate().scaleX(1.03f).scaleY(1.03f).setDuration(800).start()
+        fg.animate().scaleX(1.03f).scaleY(1.03f).setDuration(800).start()
+
+        val maxDrift = dp(12).toFloat()
+        driftAnimator?.cancel()
+        driftAnimator = ValueAnimator.ofFloat(0f, 1f, -1f, 0f).apply {
+            duration = 38_000L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { anim ->
+                val f = anim.animatedValue as Float
+                wp.translationX = f * maxDrift
+                fg.translationX = f * maxDrift * 1.4f
+            }
+            start()
+        }
+    }
+
+    private fun resetParallaxDrift() {
+        idleHandler.removeCallbacks(idleRunnable)
+        if (driftAnimator != null) {
+            driftAnimator?.cancel()
+            driftAnimator = null
+            findViewById<ImageView>(R.id.wallpaper)?.animate()?.translationX(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(250)?.start()
+            findViewById<ImageView>(R.id.mountainForeground)?.animate()?.translationX(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(250)?.start()
+        }
+        val rawWp = currentWallpaper()
+        val curWp = resolveDynamicWallpaper(rawWp)
+        val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
+        if (isApple && prefs.getBoolean("ambient_drift", true)) {
+            idleHandler.postDelayed(idleRunnable, 15_000L)
+        }
+    }
+
+    private fun initNowPlayingPill() {
+        val pill = findViewById<LinearLayout>(R.id.nowPlayingPill) ?: return
+        pill.setOnClickListener {
+            val track = MediaBridge.currentTrack ?: return@setOnClickListener
+            try {
+                track.controller?.sessionActivity?.send()
+            } catch (e: Exception) {
+                val pkg = track.packageName
+                if (pkg.isNotEmpty()) {
+                    val intent = packageManager.getLeanbackLaunchIntentForPackage(pkg)
+                        ?: packageManager.getLaunchIntentForPackage(pkg)
+                    intent?.let { startActivity(it) }
+                }
+            }
+        }
+        pill.setOnFocusChangeListener { v, hasFocus ->
+            v.animate().scaleX(if (hasFocus) 1.05f else 1f).scaleY(if (hasFocus) 1.05f else 1f).setDuration(150).start()
+        }
+        MediaBridge.onMediaChanged = { track ->
+            ui.post { updateNowPlayingPill(track) }
+        }
+        updateNowPlayingPill(MediaBridge.currentTrack)
+    }
+
+    private fun updateNowPlayingPill(track: MediaTrackInfo?) {
+        val pill = findViewById<LinearLayout>(R.id.nowPlayingPill) ?: return
+        val isLiveEnabled = prefs.getBoolean("live_activity", true)
+        val rawWp = currentWallpaper()
+        val curWp = resolveDynamicWallpaper(rawWp)
+        val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
+
+        if (!isLiveEnabled || !isApple || track == null || track.title.isEmpty()) {
+            if (pill.visibility != View.GONE) {
+                pill.animate().alpha(0f).translationY(dp(8).toFloat()).setDuration(250).withEndAction {
+                    pill.visibility = View.GONE
+                }.start()
+            }
+            return
+        }
+
+        findViewById<TextView>(R.id.nowPlayingTitle)?.text = track.title
+        findViewById<TextView>(R.id.nowPlayingArtist)?.text = if (track.artist.isNotEmpty()) track.artist else track.packageName
+        val artView = findViewById<ImageView>(R.id.nowPlayingArt)
+        if (artView != null) {
+            artView.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(6).toFloat())
+                }
+            }
+            artView.clipToOutline = true
+            if (track.art != null) {
+                artView.setImageBitmap(track.art)
+            } else {
+                try {
+                    artView.setImageDrawable(packageManager.getApplicationIcon(track.packageName))
+                } catch (e: Exception) {
+                    artView.setImageResource(R.drawable.logo_spotify)
+                }
+            }
+        }
+        val badge = findViewById<TextView>(R.id.nowPlayingBadge)
+        badge?.text = if (track.isPlaying) "♫" else "❙❙"
+
+        if (pill.visibility != View.VISIBLE) {
+            pill.alpha = 0f
+            pill.translationY = dp(8).toFloat()
+            pill.visibility = View.VISIBLE
+            pill.animate().alpha(1f).translationY(0f).setDuration(300).start()
+        }
+    }
+
     private fun toggleApplePreset() {
         val order = APPLE_PRESETS.map { it.first }
         val cur = currentWallpaper(true)
@@ -828,12 +981,13 @@ class MainActivity : Activity() {
         toast(APPLE_PRESETS.first { it.first == next }.second)
     }
 
-    private fun applyClockPreset(choice: String) {
+    private fun applyClockPreset(rawChoice: String) {
         val clock = findViewById<GlassClock>(R.id.clock) ?: return
         val date = findViewById<GlassClock>(R.id.date) ?: return
         val box = findViewById<LinearLayout>(R.id.depthClockBox) ?: return
 
-        val isApple = choice == "res:Apple Dusk" || choice == "res:Apple Day"
+        val choice = resolveDynamicWallpaper(rawChoice)
+        val isApple = rawChoice == "auto:apple" || choice == "res:Apple Dusk" || choice == "res:Apple Day"
         val isSunset = choice == "res:Sunset (dusk)"
 
         if (isApple) {
@@ -847,9 +1001,17 @@ class MainActivity : Activity() {
                 topMargin = dp(-8)
                 clock.layoutParams = this
             }
+            val fontKey = prefs.getString("clock_font", "bold")
+            val tf = when (fontKey) {
+                "rounded" -> Typeface.create("sans-serif-medium", Typeface.BOLD)
+                "serif" -> Typeface.create("serif", Typeface.BOLD)
+                "condensed" -> Typeface.create("sans-serif-condensed", Typeface.BOLD)
+                else -> Typeface.create("sans-serif-black", Typeface.BOLD)
+            }
             clock.apply {
+                typeface = tf
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 134f)
-                letterSpacing = -0.02f
+                letterSpacing = if (fontKey == "condensed") -0.01f else -0.02f
                 setPadding(dp(8), 0, dp(8), dp(4))
                 setTextColor(if (isDusk) 0xFFFFFDFB.toInt() else 0xFFFFFFFF.toInt())
                 val dens = resources.displayMetrics.density
@@ -880,6 +1042,7 @@ class MainActivity : Activity() {
             val clockCol = if (isSunset) 0xFFFFEFE0.toInt() else 0xFFF2F6FF.toInt()
             val dateCol = if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt()
             clock.apply {
+                typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 118f)
                 letterSpacing = -0.03f
                 setPadding(0, 0, 0, 0)
@@ -897,6 +1060,7 @@ class MainActivity : Activity() {
                 invalidate()
             }
         }
+        showWeather()
     }
 
     private fun fitInk() {
@@ -972,7 +1136,8 @@ class MainActivity : Activity() {
 
     /** A plain choice first (just the theme's base colour, no image), then pictures. */
     private fun wallpaperChoices(forDark: Boolean): List<Pair<String, String>> =
-        listOf(plainWallpaper(forDark).let { wallpaperName(it) to it }) +
+        listOf("Apple · Dynamisch (Tag/Nacht)" to "auto:apple") +
+            listOf(plainWallpaper(forDark).let { wallpaperName(it) to it }) +
             BUNDLED_WALLPAPERS.keys.map { wallpaperName("res:$it") to "res:$it" } +
             (wallpaperName(Bing.CHOICE) to Bing.CHOICE) +
             (wallpaperDir()?.listFiles { f -> f.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp") }
@@ -1051,6 +1216,7 @@ class MainActivity : Activity() {
     private fun text2() = if (frosted()) 0xFFCCCCCC.toInt() else DARK_TEXT_2
 
     private fun wallpaperName(choice: String) = when {
+        choice == "auto:apple" -> "Apple · Dynamisch (Tag/Nacht)"
         choice == Bing.CHOICE -> getString(R.string.bing_daily)
         choice.startsWith("folder:") -> getString(R.string.folder_name, choice.substringAfter(':').substringAfter(':'))
         else -> choice.substringAfter(':').substringBeforeLast('.').let { n -> WALLPAPER_NAMES[n]?.let { getString(it) } ?: n }
@@ -1059,11 +1225,12 @@ class MainActivity : Activity() {
     private fun loadWallpaper() {
         val view = findViewById<ImageView>(R.id.wallpaper)
         val fgView = findViewById<ImageView>(R.id.mountainForeground)
-        val choice = currentWallpaper()
+        val rawChoice = currentWallpaper()
+        val choice = resolveDynamicWallpaper(rawChoice)
         if (choice.startsWith("plain:")) { // the root's ground colour shows through
             view.setImageDrawable(null)
             fgView.setImageDrawable(null)
-            applyClockPreset(choice)
+            applyClockPreset(rawChoice)
             glass.setBlur(null)
             wpRaw = null
             fadesOn = false
@@ -1114,12 +1281,12 @@ class MainActivity : Activity() {
             }
             ui.post {
                 fgView.setImageBitmap(fgShown)
-                applyClockPreset(choice)
+                applyClockPreset(rawChoice)
                 glass.setBlur(blur)
                 glassSurfaces.forEach { it.get()?.setBlur(glass.blur) }
                 if (settingsScrim.visibility == View.VISIBLE) showPanelGlass()
                 wpRaw = thumb
-                fadesOn = own != null && !choice.startsWith("res:")
+                fadesOn = own != null && !choice.startsWith("res:") && choice != "auto:apple"
                 refreshFades()
                 val old = view.drawable
                 if (old == null || shown == null) return@post view.setImageBitmap(shown)
@@ -1131,7 +1298,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun decodeWallpaper(choice: String): Bitmap? {
+    private fun decodeWallpaper(rawChoice: String): Bitmap? {
+        val choice = resolveDynamicWallpaper(rawChoice)
         BUNDLED_WALLPAPERS[choice.removePrefix("res:")]?.let { res ->
             val opts = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -1527,6 +1695,10 @@ class MainActivity : Activity() {
     private fun renderSettings(at: Int = 0) {
         val theme = prefs.getString("theme", "light")!!
         val sort = prefs.getString("sort", "manual")!!
+        val clockFont = prefs.getString("clock_font", "bold")!!
+        val ambientDrift = prefs.getBoolean("ambient_drift", true)
+        val liveActivity = prefs.getBoolean("live_activity", true)
+        val fontNames = mapOf("bold" to getString(R.string.font_bold), "rounded" to getString(R.string.font_rounded), "serif" to getString(R.string.font_serif), "condensed" to getString(R.string.font_condensed))
         val hidden = prefs.getStringSet("hidden_watch", emptySet())!!.size
         val weather = prefs.getString("weather", "off")!!
         val unit = if (weather == "off") prefs.getString("wx_unit", "c")!! else weather
@@ -1574,6 +1746,25 @@ class MainActivity : Activity() {
                 showWatchNext(watchList)
                 renderSettings(R.string.show_icons)
             },
+            R.string.clock_font to { d ->
+                val order = listOf("bold", "rounded", "serif", "condensed")
+                val next = order[(order.indexOf(clockFont) + d).mod(order.size)]
+                prefs.edit().putString("clock_font", next).apply()
+                applyClockPreset(currentWallpaper())
+                renderSettings(R.string.clock_font)
+            },
+            R.string.ambient_drift to { _ ->
+                val next = !prefs.getBoolean("ambient_drift", true)
+                prefs.edit().putBoolean("ambient_drift", next).apply()
+                resetParallaxDrift()
+                renderSettings(R.string.ambient_drift)
+            },
+            R.string.live_activity to { _ ->
+                val next = !prefs.getBoolean("live_activity", true)
+                prefs.edit().putBoolean("live_activity", next).apply()
+                updateNowPlayingPill(MediaBridge.currentTrack)
+                renderSettings(R.string.live_activity)
+            },
         )
         val rows = linkedMapOf<Int, Triple<String, String, () -> Unit>>(
             R.string.edit_apps_row to Triple(getString(R.string.edit_apps_row), "") { closeLauncherSettings(); startEdit(grab = null) },
@@ -1585,6 +1776,15 @@ class MainActivity : Activity() {
             R.string.glass to Triple(getString(R.string.glass), toggle(glassOn())) {
                 prefs.edit().putBoolean("glass", !glassOn()).putBoolean("reopen_settings", true).apply()
                 recreate() // tile colours are applied once per activity; reopen the panel after
+            },
+            R.string.clock_font to Triple(getString(R.string.clock_font), fontNames[clockFont] ?: getString(R.string.font_bold)) {
+                steps[R.string.clock_font]!!(1)
+            },
+            R.string.ambient_drift to Triple(getString(R.string.ambient_drift), toggle(ambientDrift)) {
+                steps[R.string.ambient_drift]!!(1)
+            },
+            R.string.live_activity to Triple(getString(R.string.live_activity), toggle(liveActivity)) {
+                steps[R.string.live_activity]!!(1)
             },
             // Select steps up like Right, and past 100% starts again at 0%.
             R.string.fade_top to Triple(getString(R.string.fade_top), "$SLIDER${fade("fade_top")}") { steps[R.string.fade_top]!!(if (fade("fade_top") == 100) -100 / FADE_STEP else 1) },
@@ -1681,7 +1881,9 @@ class MainActivity : Activity() {
         // In the order things sit on the home screen, top to bottom, then what isn't on it.
         val sections = listOf(
             Triple(R.string.section_appearance, "${rows[R.string.theme]!!.second} · ${wallpaperName(currentWallpaper(dark))}",
-                listOfNotNull(R.string.theme, R.string.light_wallpaper, R.string.dark_wallpaper, R.string.fade_top.takeIf { photo },
+                listOfNotNull(R.string.theme, R.string.light_wallpaper, R.string.dark_wallpaper,
+                    R.string.clock_font, R.string.ambient_drift, R.string.live_activity,
+                    R.string.fade_top.takeIf { photo },
                     R.string.fade_bottom.takeIf { photo }, R.string.glass,
                     R.string.folder_photo_changes.takeIf { folder })),
             Triple(R.string.section_clock_weather, if (weather == "off") on(false) else "${rows[R.string.weather_units]!!.second} · ${rows[R.string.weather_location]!!.second}",
@@ -2720,6 +2922,7 @@ class MainActivity : Activity() {
      * listener in style() is a fallback for remotes that send no repeats. [holdFired] stops both firing.
      */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        resetParallaxDrift()
         val confirm = e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER ||
             e.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (confirm) {
@@ -2761,9 +2964,16 @@ class MainActivity : Activity() {
         val cards = if (watchScroll.visibility != View.VISIBLE) null
             else alive(lastCard) ?: (watchRow.getChildAt(0) as? ViewGroup)?.getChildAt(0)
         val top = alive(lastTop) ?: findViewById(R.id.launcherSettings)
+        val pill = findViewById<View>(R.id.nowPlayingPill)?.takeIf { it.visibility == View.VISIBLE }
         return when {
-            v.parent === wifi.parent -> when (key) { // top bar
+            v.id == R.id.nowPlayingPill -> when (key) {
+                KeyEvent.KEYCODE_DPAD_UP -> top
                 KeyEvent.KEYCODE_DPAD_DOWN -> cards ?: apps ?: v
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> v
+                else -> null
+            }
+            v.parent === wifi.parent -> when (key) { // top bar
+                KeyEvent.KEYCODE_DPAD_DOWN -> pill ?: cards ?: apps ?: v
                 KeyEvent.KEYCODE_DPAD_UP -> v
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.presetButton) v else null
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (v.id == R.id.launcherSettings) v else null
@@ -2772,7 +2982,7 @@ class MainActivity : Activity() {
             v.getTag(R.id.watchRow) is Prog -> { // Continue Watching (above dock)
                 val i = watchRow.indexOfChild(v.parent as View)
                 when (key) {
-                    KeyEvent.KEYCODE_DPAD_UP -> top
+                    KeyEvent.KEYCODE_DPAD_UP -> pill ?: top
                     KeyEvent.KEYCODE_DPAD_DOWN -> apps ?: v
                     KeyEvent.KEYCODE_DPAD_LEFT -> if (i == 0) v else null
                     KeyEvent.KEYCODE_DPAD_RIGHT -> if (i == watchRow.childCount - 1) v else null
@@ -2780,7 +2990,7 @@ class MainActivity : Activity() {
                 }
             }
             v.parent === appRow -> when (key) { // Bottom Apple Dock
-                KeyEvent.KEYCODE_DPAD_UP -> cards ?: top
+                KeyEvent.KEYCODE_DPAD_UP -> pill ?: cards ?: top
                 KeyEvent.KEYCODE_DPAD_DOWN -> v
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (appRow.indexOfChild(v) == 0) v else null
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (appRow.indexOfChild(v) == appRow.childCount - 1) v else null
@@ -3462,17 +3672,59 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun weatherEmoji(code: Int) = when (code) {
+        0 -> "☀️"
+        1, 2 -> "🌤️"
+        3 -> "☁️"
+        45, 48 -> "🌫️"
+        in 51..57 -> "🌦️"
+        in 61..67, in 80..82 -> "🌧️"
+        in 71..77, 85, 86 -> "🌨️"
+        in 95..99 -> "⛈️"
+        else -> "⛅"
+    }
+
     private fun showWeather() {
-        val view = findViewById<TextView>(R.id.weather)
+        val view = findViewById<TextView>(R.id.weather) ?: return
         val unit = prefs.getString("weather", "off")
-        if (unit == "off" || !prefs.contains("wx_temp")) {
+        val rawWp = currentWallpaper()
+        val curWp = resolveDynamicWallpaper(rawWp)
+        val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
+
+        if (isApple && unit == "off" && !prefs.contains("wx_temp")) {
+            prefs.edit().putString("weather", "c").apply()
+            ui.removeCallbacks(weatherTick)
+            ui.post(weatherTick)
+        }
+
+        val effectiveUnit = prefs.getString("weather", "off")
+        if (effectiveUnit == "off" || !prefs.contains("wx_temp")) {
             view.visibility = View.GONE
             return
         }
         val c = prefs.getFloat("wx_temp", 0f)
-        val temp = Math.round(if (unit == "f") c * 9 / 5 + 32 else c)
-        view.text = listOfNotNull("$temp° ${weatherWord(prefs.getInt("wx_code", 0))}".trim(), prefs.getString("geo_city", null))
-            .joinToString("  ·  ")
+        val temp = Math.round(if (effectiveUnit == "f") c * 9 / 5 + 32 else c)
+        val code = prefs.getInt("wx_code", 0)
+
+        if (isApple) {
+            view.text = "·  ${weatherEmoji(code)} $temp°"
+            view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            view.alpha = 0.95f
+            view.letterSpacing = 0.02f
+            val isDusk = curWp == "res:Apple Dusk"
+            view.setTextColor(if (isDusk) 0xFFFFF2EB.toInt() else 0xFFF2F6FF.toInt())
+            val dens = resources.displayMetrics.density
+            view.setShadowLayer(5f * dens, 0f, 1f * dens, 0x44000000)
+        } else {
+            view.text = listOfNotNull("$temp° ${weatherWord(code)}".trim(), prefs.getString("geo_city", null))
+                .joinToString("  ·  ")
+            view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            view.alpha = 0.82f
+            view.letterSpacing = 0.04f
+            val isSunset = curWp == "res:Sunset (dusk)"
+            view.setTextColor(if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt())
+            view.setShadowLayer(0f, 0f, 0f, 0)
+        }
         view.visibility = View.VISIBLE
         view.post { fitInk() }
     }
@@ -4094,8 +4346,9 @@ class MainActivity : Activity() {
         )
         /** The ✨ button cycles through these: wallpaper choice -> name shown. */
         val APPLE_PRESETS = listOf(
-            "res:Apple Dusk" to "Preset 1 · Apple Sierra (Alpenglow)",
-            "res:Apple Day" to "Preset 2 · Apple High Sierra",
+            "auto:apple" to "Apple · Dynamisch (Tag/Nacht)",
+            "res:Apple Day" to "Apple · High Sierra (Tag)",
+            "res:Apple Dusk" to "Apple · Sierra (Dämmerung)",
             "res:Rockies (dusk)" to "Fallback 1 · Alpine Midnight",
             "res:Sunset (dusk)" to "Fallback 2 · Sunset Alpenglow",
         )

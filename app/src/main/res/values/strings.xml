@@ -276,4 +276,11 @@
         <item quantity="one">%d key</item>
         <item quantity="other">%d keys</item>
     </plurals>
+    <string name="clock_font">Lock Screen Font</string>
+    <string name="ambient_drift">Cinematic Parallax Drift</string>
+    <string name="live_activity">Live Activity (Now Playing)</string>
+    <string name="font_bold">Bold (Apple Default)</string>
+    <string name="font_rounded">Rounded (Soft)</string>
+    <string name="font_serif">Serif (Editorial)</string>
+    <string name="font_condensed">Condensed (Compact)</string>
 </resources>
