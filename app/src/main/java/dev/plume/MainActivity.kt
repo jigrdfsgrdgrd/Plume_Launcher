@@ -64,6 +64,7 @@ import android.text.TextUtils
 import android.text.format.DateFormat
 import android.text.style.BulletSpan
 import android.util.LruCache
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -330,6 +331,9 @@ class MainActivity : Activity() {
                 .putBoolean("cw_colour", true)
                 .putBoolean("tip_move", true)
                 .apply()
+        }
+        if (!prefs.getBoolean("apple_setup_v2", false)) {
+            prefs.edit().putBoolean("apple_setup_v2", true).putString("theme", "dark").putString("wp_dark", "res:Apple Dusk").apply()
         }
         setContentView(R.layout.activity_main)
         glass = GlassLayer(this)
@@ -812,30 +816,104 @@ class MainActivity : Activity() {
         .map { findViewById<ImageView>(it) }
 
     private fun toggleApplePreset() {
+        val order = APPLE_PRESETS.map { it.first }
         val cur = currentWallpaper(true)
-        val next = if (cur == "res:Sunset (dusk)") "res:Rockies (dusk)" else "res:Sunset (dusk)"
+        val next = order[(order.indexOf(cur) + 1).mod(order.size)]
         prefs.edit().putString("theme", "dark").putString("wp_dark", next).apply()
         if (!dark) {
             recreate()
             return
         }
         loadWallpaper()
-        val presetName = if (next == "res:Sunset (dusk)") "Preset 2 · Sunset Alpenglow" else "Preset 1 · Alpine Midnight"
-        toast(presetName)
+        toast(APPLE_PRESETS.first { it.first == next }.second)
+    }
+
+    private fun applyClockPreset(choice: String) {
+        val clock = findViewById<GlassClock>(R.id.clock) ?: return
+        val date = findViewById<GlassClock>(R.id.date) ?: return
+        val box = findViewById<LinearLayout>(R.id.depthClockBox) ?: return
+
+        val isApple = choice == "res:Apple Dusk" || choice == "res:Apple Day"
+        val isSunset = choice == "res:Sunset (dusk)"
+
+        if (isApple) {
+            val isDusk = choice == "res:Apple Dusk"
+            (box.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                topMargin = dp(24)
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                box.layoutParams = this
+            }
+            (clock.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                topMargin = dp(-8)
+                clock.layoutParams = this
+            }
+            clock.apply {
+                isAppleLockScreen = true
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 134f)
+                letterSpacing = -0.02f
+                setPadding(dp(8), 0, dp(8), dp(4))
+                val dens = resources.displayMetrics.density
+                glassShadowRadius = 14f * dens
+                glassShadowDy = 2.5f * dens
+                glassShadowColor = 0x48000000
+                rimWidth = 0.8f * dens
+                rimTop = 0x99FFFFFF.toInt()
+                washTop = 0xFFFFFFFF.toInt()
+                washBottom = if (isDusk) 0xFFFFF0E6.toInt() else 0xFFF0F5FA.toInt()
+                invalidate()
+            }
+            date.apply {
+                isAppleLockScreen = false
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                isAllCaps = false
+                letterSpacing = 0.02f
+                alpha = 0.95f
+                setTextColor(if (isDusk) 0xFFFFF2EB.toInt() else 0xFFF2F6FF.toInt())
+                val dens = resources.displayMetrics.density
+                setShadowLayer(8f * dens, 0f, 1.5f * dens, 0x40000000)
+                invalidate()
+            }
+        } else {
+            // Fallback presets (Alpine Midnight & Sunset Alpenglow) - EXACT original fallback-v1 specifications!
+            (box.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                topMargin = dp(16)
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                box.layoutParams = this
+            }
+            (clock.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                topMargin = dp(-14)
+                clock.layoutParams = this
+            }
+            val clockCol = if (isSunset) 0xFFFFEFE0.toInt() else 0xFFF2F6FF.toInt()
+            val dateCol = if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt()
+            clock.apply {
+                isAppleLockScreen = false
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 118f)
+                letterSpacing = -0.03f
+                setPadding(0, 0, 0, 0)
+                setTextColor(clockCol)
+                setShadowLayer(0f, 0f, 0f, 0)
+                invalidate()
+            }
+            date.apply {
+                isAppleLockScreen = false
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                isAllCaps = true
+                letterSpacing = 0.06f
+                alpha = 0.82f
+                setTextColor(dateCol)
+                setShadowLayer(0f, 0f, 0f, 0)
+                invalidate()
+            }
+        }
     }
 
     private fun fitInk() {
         val top = listOf(R.id.clock, R.id.date, R.id.weather).map { findViewById<TextView>(it) }
         val hasDepthMtn = findViewById<ImageView>(R.id.mountainForeground).drawable != null
-        if (hasDepthMtn) {
-            val isSunset = currentWallpaper() == "res:Sunset (dusk)"
-            val clockCol = if (isSunset) 0xFFFFEFE0.toInt() else 0xFFF2F6FF.toInt()
-            val dateCol = if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt()
-            for (v in top) {
-                v.setShadowLayer(0f, 0f, 0f, 0)
-                v.setTextColor(if (v.id == R.id.clock) clockCol else dateCol)
-            }
-        } else {
+        val choice = currentWallpaper()
+        applyClockPreset(choice)
+        if (!hasDepthMtn) {
             val topInk = inkBehind(top)
             for (v in top) ink(v, topInk, fade = true)
         }
@@ -913,7 +991,7 @@ class MainActivity : Activity() {
     // Light gets a soft white (the light ground colour), not #FFFFFF: pure white glares on a TV.
     private fun plainWallpaper(forDark: Boolean) = if (forDark) "plain:Pure black" else "plain:Soft white"
 
-    private fun defaultWallpaper(forDark: Boolean) = if (forDark) "res:Rockies (dusk)" else "res:Rockies (day)"
+    private fun defaultWallpaper(forDark: Boolean) = if (forDark) "res:Apple Dusk" else "res:Rockies (day)"
 
     private fun currentWallpaper(forDark: Boolean = dark) =
         prefs.getString(if (forDark) "wp_dark" else "wp_light", null) ?: defaultWallpaper(forDark)
@@ -994,6 +1072,7 @@ class MainActivity : Activity() {
         if (choice.startsWith("plain:")) { // the root's ground colour shows through
             view.setImageDrawable(null)
             fgView.setImageDrawable(null)
+            applyClockPreset(choice)
             glass.setBlur(null)
             wpRaw = null
             fadesOn = false
@@ -1012,6 +1091,8 @@ class MainActivity : Activity() {
             val effectiveChoice = if (own != null) choice else fallback
             val bmp = own ?: decodeWallpaper(fallback)
             val fgRes = when (effectiveChoice) {
+                "res:Apple Dusk" -> R.drawable.wallpaper_fg_apple_dusk
+                "res:Apple Day" -> R.drawable.wallpaper_fg_apple_day
                 "res:Rockies (dusk)" -> R.drawable.wallpaper_fg_dark
                 "res:Sunset (dusk)" -> R.drawable.wallpaper_fg_preset2
                 "res:Rockies (day)" -> R.drawable.wallpaper_fg_light
@@ -1042,6 +1123,7 @@ class MainActivity : Activity() {
             }
             ui.post {
                 fgView.setImageBitmap(fgShown)
+                applyClockPreset(choice)
                 glass.setBlur(blur)
                 glassSurfaces.forEach { it.get()?.setBlur(glass.blur) }
                 if (settingsScrim.visibility == View.VISIBLE) showPanelGlass()
@@ -4019,7 +4101,16 @@ class MainActivity : Activity() {
             "Rockies (day)" to R.string.wp_rockies_day, "Rockies (dusk)" to R.string.wp_rockies_dusk,
             "Pure black" to R.string.wp_pure_black, "Soft white" to R.string.wp_soft_white,
         )
+        /** The ✨ button cycles through these: wallpaper choice -> name shown. */
+        val APPLE_PRESETS = listOf(
+            "res:Apple Dusk" to "Preset 1 · Apple Sierra (Alpenglow)",
+            "res:Apple Day" to "Preset 2 · Apple High Sierra",
+            "res:Rockies (dusk)" to "Fallback 1 · Alpine Midnight",
+            "res:Sunset (dusk)" to "Fallback 2 · Sunset Alpenglow",
+        )
         val BUNDLED_WALLPAPERS = linkedMapOf(
+            "Apple Dusk" to R.drawable.wallpaper_apple_dusk,
+            "Apple Day" to R.drawable.wallpaper_apple_day,
             "Rockies (dusk)" to R.drawable.wallpaper_dark,
             "Sunset (dusk)" to R.drawable.wallpaper_preset2,
             "Rockies (day)" to R.drawable.wallpaper,
