@@ -156,7 +156,7 @@ internal class GlassLayer(context: Context) : View(context) {
             // Where the tile is drawn, lift included; what a scroll view cuts off of it stays cut off.
             rect.set(at[0] - ox.toFloat(), at[1] - oy.toFloat(), at[0] - ox + v.width * v.scaleX, at[1] - oy + v.height * v.scaleY)
             c.save()
-            c.clipRect(visible.left - ox.toFloat(), visible.top - oy.toFloat(), visible.right - ox.toFloat(), visible.bottom - oy.toFloat())
+            c.clipRect(visible.left - ox.toFloat() - 24f, 0f, visible.right - ox.toFloat() + 24f, height.toFloat())
             c.drawRoundRect(rect, t.radius * v.scaleX, t.radius * v.scaleY, paint)
             c.restore()
         }

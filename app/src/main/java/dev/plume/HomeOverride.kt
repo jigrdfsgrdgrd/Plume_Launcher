@@ -2,7 +2,12 @@ package dev.plume
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
@@ -10,12 +15,42 @@ import android.view.accessibility.AccessibilityEvent
  * Google TV's launcher has to stay enabled (disabling it boot-loops the TV), so we take the Home key before
  * the system sees it and open our home directly; Google TV never flashes up. Holding Home still opens the
  * Google TV dashboard. Covering Google TV whenever it shows stays as the fallback for anything else that
- * opens it (e.g. Back out of the last app).
+ * opens it (e.g. Back out of the last app, or TV waking up from standby).
  */
 class HomeOverride : AccessibilityService() {
+    private var screenReceiver: BroadcastReceiver? = null
+    private val handler = Handler(Looper.getMainLooper())
+
     override fun onServiceConnected() {
         running = this
+        getSharedPreferences("home", MODE_PRIVATE).edit().remove("home_off").apply()
         applyKeyFilter()
+        registerScreenReceiver()
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        screenReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    handler.postDelayed({
+                        val topPkg = rootInActiveWindow?.packageName?.toString()
+                        if (topPkg == GOOGLE_TV || topPkg == SETUP_WRAITH) {
+                            goHome()
+                        }
+                    }, 350)
+                }
+            }
+        }
+        val filter = IntentFilter(Intent.ACTION_SCREEN_ON)
+        registerReceiver(screenReceiver, filter)
+    }
+
+    private fun unregisterScreenReceiver() {
+        screenReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Throwable) {}
+            screenReceiver = null
+        }
     }
 
     /**
@@ -30,11 +65,19 @@ class HomeOverride : AccessibilityService() {
         serviceInfo = serviceInfo.apply { flags = if (filter) flags or flag else flags and flag.inv() }
     }
 
-    /** Turned off, from Plume's switch or Android's Accessibility settings: the app mustn't turn it back on. */
+    /**
+     * Disconnected by system or app update: do NOT set home_off here, as Android unbinds services
+     * during app restarts, updates, and sleep cycles. home_off is only set when explicitly toggled off in settings.
+     */
     override fun onUnbind(intent: Intent?): Boolean {
         running = null
-        getSharedPreferences("home", MODE_PRIVATE).edit().putBoolean("home_off", true).apply()
+        unregisterScreenReceiver()
         return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterScreenReceiver()
     }
 
     override fun onKeyEvent(e: KeyEvent): Boolean {
@@ -71,13 +114,23 @@ class HomeOverride : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
-        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.packageName == GOOGLE_TV &&
-            e.className?.contains("dashboard", ignoreCase = true) != true
-        ) goHome()
+        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = e.packageName?.toString().orEmpty()
+            if (pkg == GOOGLE_TV || pkg == SETUP_WRAITH) {
+                val cls = e.className?.toString().orEmpty()
+                if (!cls.contains("dashboard", ignoreCase = true) && !cls.contains("SidePanel", ignoreCase = true)) {
+                    goHome()
+                }
+            }
+        }
     }
 
     // Marked as Home so the setup check can tell it from Plume being opened from the apps list.
-    private fun goHome() = startActivity(Intent(this, MainActivity::class.java).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    fun goHome() = startActivity(
+        Intent(this, MainActivity::class.java)
+            .addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    )
 
     override fun onInterrupt() {}
 
@@ -86,6 +139,7 @@ class HomeOverride : AccessibilityService() {
         var running: HomeOverride? = null
             private set
         private const val GOOGLE_TV = "com.google.android.apps.tv.launcherx"
+        private const val SETUP_WRAITH = "com.google.android.tungsten.setupwraith"
         private const val LONG_PRESS_MS = 500L
     }
 }

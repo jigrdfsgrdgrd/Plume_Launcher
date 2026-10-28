@@ -208,9 +208,24 @@ internal fun isBannerStyle(style: String) = style.startsWith("banner")
 internal fun iconStyleOf(stored: String?, oldColour: Boolean) =
     stored?.takeIf { it in ICON_STYLE_KEYS } ?: if (oldColour) "colour" else "mono"
 
+internal fun ensureHomeServiceGlobally(context: Context) {
+    val prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE)
+    if (prefs.getBoolean("home_off", false)) return
+    if (context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != PackageManager.PERMISSION_GRANTED) return
+    val me = ComponentName(context, HomeOverride::class.java).flattenToString()
+    val on = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+    val list = on.split(':').filter { it.isNotBlank() }
+    if (me !in list) {
+        val newOn = if (on.isEmpty()) me else "$on:$me"
+        Settings.Secure.putString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newOn)
+    }
+    Settings.Secure.putInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+}
+
 /** Allowed to start an activity from the background because the Home button service is bound. */
 class Updated : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
+        ensureHomeServiceGlobally(c)
         c.startActivity(Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
@@ -303,9 +318,22 @@ class MainActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        prefs.edit().remove("home_off").apply()
+        ensureHomeServiceGlobally(this)
+        if (!prefs.getBoolean("apple_setup_v1", false)) {
+            prefs.edit()
+                .putBoolean("apple_setup_v1", true)
+                .putString("theme", "dark")
+                .putBoolean("glass", true)
+                .putString("row_align", "centre")
+                .putString("icon_style", "colour")
+                .putBoolean("cw_colour", true)
+                .putBoolean("tip_move", true)
+                .apply()
+        }
         setContentView(R.layout.activity_main)
         glass = GlassLayer(this)
-        findViewById<ViewGroup>(R.id.root).addView(glass, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) // over the wallpaper, under the home screen
+        findViewById<ViewGroup>(R.id.root).let { r -> r.addView(glass, r.indexOfChild(findViewById(R.id.content)), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
         for (id in intArrayOf(R.id.appScroll, R.id.watchScroll, R.id.allApps)) findViewById<View>(id).setOnScrollChangeListener { _, _, _, _, _ -> glass.kick(150) }
         appRow = findViewById(R.id.appRow)
         watchRow = findViewById(R.id.watchRow)
@@ -329,6 +357,7 @@ class MainActivity : Activity() {
 
         // Top bar: network, All apps, Android settings, launcher settings. Round, lit on focus.
         for ((id, action) in listOf<Pair<Int, () -> Unit>>(
+            R.id.presetButton to { toggleApplePreset() },
             R.id.wifi to { unlock { openSettings(Settings.ACTION_WIFI_SETTINGS) } },
             R.id.sourcesButton to { showSources(findViewById(R.id.sourcesButton)) },
             R.id.allAppsButton to { openAllApps() },
@@ -336,14 +365,15 @@ class MainActivity : Activity() {
             R.id.launcherSettings to { unlock { openLauncherSettings() } },
         )) findViewById<ImageView>(id).apply {
             setColorFilter(fg)
+            alpha = 0.55f
             val ring = GradientDrawable().apply { shape = GradientDrawable.OVAL }
-            // Lit, the icon sits on its ring, so it takes the theme colour; otherwise it's on the wallpaper (see fitInk).
             background = ring
             setOnFocusChangeListener { v, focused ->
                 if (focused) lastTop = v
                 ring.setColor(if (!focused) 0 else if (dark) DARK_CARD_LIT[0] else Color.WHITE)
                 setColorFilter(if (focused) fg else iconInk)
-                animate().scaleX(if (focused) 1.15f else 1f).scaleY(if (focused) 1.15f else 1f)
+                animate().alpha(if (focused) 1f else 0.55f)
+                    .scaleX(if (focused) 1.18f else 1f).scaleY(if (focused) 1.18f else 1f)
                     .setDuration(160).setInterpolator(DECELERATE).start()
             }
             setOnClickListener { action() }
@@ -462,12 +492,7 @@ class MainActivity : Activity() {
      * unless the user turned it off.
      */
     private fun ensureHomeService() {
-        if (homeServiceOn()) return prefs.edit().remove("home_off").apply() // what Android says wins
-        if (prefs.getBoolean("home_off", false) || checkSelfPermission(WRITE_SECURE) != PackageManager.PERMISSION_GRANTED) return
-        val me = ComponentName(this, HomeOverride::class.java).flattenToString()
-        val on = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-        Settings.Secure.putString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, if (on.isEmpty()) me else "$on:$me")
-        Settings.Secure.putInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+        ensureHomeServiceGlobally(this)
     }
 
     /** Compared as components: Settings may store us in short form (dev.plume/.HomeOverride). */
@@ -783,13 +808,37 @@ class MainActivity : Activity() {
     private var watchInk = Color.BLACK
     private var iconInk = Color.BLACK
 
-    private fun topIcons() = listOf(R.id.wifi, R.id.sourcesButton, R.id.allAppsButton, R.id.systemSettings, R.id.launcherSettings)
+    private fun topIcons() = listOf(R.id.presetButton, R.id.wifi, R.id.sourcesButton, R.id.allAppsButton, R.id.systemSettings, R.id.launcherSettings)
         .map { findViewById<ImageView>(it) }
+
+    private fun toggleApplePreset() {
+        val cur = currentWallpaper(true)
+        val next = if (cur == "res:Sunset (dusk)") "res:Rockies (dusk)" else "res:Sunset (dusk)"
+        prefs.edit().putString("theme", "dark").putString("wp_dark", next).apply()
+        if (!dark) {
+            recreate()
+            return
+        }
+        loadWallpaper()
+        val presetName = if (next == "res:Sunset (dusk)") "Preset 2 · Sunset Alpenglow" else "Preset 1 · Alpine Midnight"
+        toast(presetName)
+    }
 
     private fun fitInk() {
         val top = listOf(R.id.clock, R.id.date, R.id.weather).map { findViewById<TextView>(it) }
-        val topInk = inkBehind(top)
-        for (v in top) ink(v, topInk, fade = true)
+        val hasDepthMtn = findViewById<ImageView>(R.id.mountainForeground).drawable != null
+        if (hasDepthMtn) {
+            val isSunset = currentWallpaper() == "res:Sunset (dusk)"
+            val clockCol = if (isSunset) 0xFFFFEFE0.toInt() else 0xFFF2F6FF.toInt()
+            val dateCol = if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt()
+            for (v in top) {
+                v.setShadowLayer(0f, 0f, 0f, 0)
+                v.setTextColor(if (v.id == R.id.clock) clockCol else dateCol)
+            }
+        } else {
+            val topInk = inkBehind(top)
+            for (v in top) ink(v, topInk, fade = true)
+        }
         val icons = topIcons()
         iconInk = inkBehind(icons)
         for (v in icons) if (!v.isFocused) v.setColorFilter(iconInk)
@@ -940,9 +989,11 @@ class MainActivity : Activity() {
 
     private fun loadWallpaper() {
         val view = findViewById<ImageView>(R.id.wallpaper)
+        val fgView = findViewById<ImageView>(R.id.mountainForeground)
         val choice = currentWallpaper()
         if (choice.startsWith("plain:")) { // the root's ground colour shows through
             view.setImageDrawable(null)
+            fgView.setImageDrawable(null)
             glass.setBlur(null)
             wpRaw = null
             fadesOn = false
@@ -955,13 +1006,33 @@ class MainActivity : Activity() {
                 decodeWallpaper(choice)
             } catch (e: Exception) {
                 null
-            } catch (e: OutOfMemoryError) { // a picture on a TV short of memory: show the default instead of crashing
+            } catch (e: OutOfMemoryError) {
                 null
             }
+            val effectiveChoice = if (own != null) choice else fallback
             val bmp = own ?: decodeWallpaper(fallback)
+            val fgRes = when (effectiveChoice) {
+                "res:Rockies (dusk)" -> R.drawable.wallpaper_fg_dark
+                "res:Sunset (dusk)" -> R.drawable.wallpaper_fg_preset2
+                "res:Rockies (day)" -> R.drawable.wallpaper_fg_light
+                else -> null
+            }
+            val fgBmp = fgRes?.let {
+                val opts = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inScaled = false
+                }
+                BitmapFactory.decodeResource(resources, it, opts)
+            }
+            val fgShown = fgBmp?.let { b ->
+                try {
+                    b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b
+                } catch (e: Exception) {
+                    b
+                }
+            }
             val blur = if (bmp != null && glassActive()) glassPixels(bmp, ground, dark) else null
             val thumb = bmp?.let { Bitmap.createScaledBitmap(it, 64, maxOf(1, 64 * it.height / it.width), true) }
-            // Nothing reads the pixels from here on: keep the picture in graphics memory only, not once more in the process.
             val shown = bmp?.let { b ->
                 try {
                     b.copy(Bitmap.Config.HARDWARE, false)?.also { b.recycle() } ?: b
@@ -970,15 +1041,15 @@ class MainActivity : Activity() {
                 }
             }
             ui.post {
+                fgView.setImageBitmap(fgShown)
                 glass.setBlur(blur)
-                glassSurfaces.forEach { it.get()?.setBlur(glass.blur) } // menus and cards that are open, and the panel
-                if (settingsScrim.visibility == View.VISIBLE) showPanelGlass() // a wallpaper picked from the panel itself
+                glassSurfaces.forEach { it.get()?.setBlur(glass.blur) }
+                if (settingsScrim.visibility == View.VISIBLE) showPanelGlass()
                 wpRaw = thumb
                 fadesOn = own != null && !choice.startsWith("res:")
                 refreshFades()
                 val old = view.drawable
                 if (old == null || shown == null) return@post view.setImageBitmap(shown)
-                // Soft change from one photo to the next; then drop the old one so only one stays in memory.
                 val fade = TransitionDrawable(arrayOf(old, BitmapDrawable(resources, shown))).apply { isCrossFadeEnabled = true }
                 view.setImageDrawable(fade)
                 fade.startTransition(800)
@@ -989,7 +1060,11 @@ class MainActivity : Activity() {
 
     private fun decodeWallpaper(choice: String): Bitmap? {
         BUNDLED_WALLPAPERS[choice.removePrefix("res:")]?.let { res ->
-            return BitmapFactory.decodeResource(resources, res)
+            val opts = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inScaled = false
+            }
+            return BitmapFactory.decodeResource(resources, res, opts)
         }
         // fitWallpaper's bitmap is mutable: the Bing dim is painted onto it.
         val bmp = when {
@@ -1019,7 +1094,7 @@ class MainActivity : Activity() {
             override fun onDraw(c: Canvas) {
                 if (fadesOn) paintFades(c, width.toFloat(), height.toFloat())
             }
-        }.also { findViewById<ViewGroup>(R.id.root).addView(it, 1, ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
+        }.also { v -> findViewById<ViewGroup>(R.id.root).let { r -> r.addView(v, r.indexOfChild(glass), ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)) } }
     }
 
     /** Strength of the "fade_top" or "fade_bottom" layer, 0-100; 0 is off. Starts off for anyone who had Photo fade off. */
@@ -2079,7 +2154,32 @@ class MainActivity : Activity() {
             }
             val inputs = hdmiInputs()
             ui.post {
-                if (inputs.isNotEmpty() && !prefs.getBoolean("inputs_moved", false)) moveInputsToSources(inputs)
+                if (!prefs.getBoolean("apple_curated_v3", false) && list.isNotEmpty()) {
+                    val favOrder = listOf(
+                        "org.smarttube.stable",
+                        "com.google.android.youtube.tv",
+                        "com.amazon.amazonvideo.livingroom",
+                        "com.spotify.tv.android",
+                        "tv.twitch.android.app",
+                        "com.shieldglow.tv",
+                        "com.phlox.tvwebbrowser",
+                    )
+                    val favSet = favOrder.toSet()
+                    val nonFavHidden = list.map { it.pkg }.filter { it !in favSet }.toSet()
+                    val activeInputs = inputs.filter { it.label == "Receiver" || it.label == "PC" }.ifEmpty { inputs.take(2) }
+                    val pinnedSet = activeInputs.map { it.pkg }.toSet()
+                    val initialOrder = favOrder.filter { p -> list.any { it.pkg == p } } + activeInputs.map { it.pkg }
+                    prefs.edit()
+                        .putBoolean("apple_curated_v3", true)
+                        .putBoolean("inputs_moved", true)
+                        .putStringSet("inputs_pinned", pinnedSet)
+                        .putStringSet("row_hidden", nonFavHidden)
+                        .putString("order", initialOrder.joinToString(","))
+                        .putString("sort", "manual")
+                        .apply()
+                } else if (inputs.isNotEmpty() && !prefs.getBoolean("inputs_moved", false)) {
+                    moveInputsToSources(inputs)
+                }
                 apps = list
                 APPS = list
                 sources = inputs
@@ -2123,16 +2223,56 @@ class MainActivity : Activity() {
             val port = input.parentId ?: input.id
             val named = input.parentId != null
             val label = (if (named) input.loadLabel(this) else input.loadCustomLabel(this) ?: input.loadLabel(this)).toString()
+            val hwDigits = port.substringAfter("HW", "").filter { it.isDigit() }.toIntOrNull()
+            val portNum = label.filter { it.isDigit() }.ifEmpty {
+                if (hwDigits != null && hwDigits >= 15) (hwDigits - 14).toString() else hwDigits?.toString().orEmpty()
+            }
+            val customLabel = when (portNum) {
+                "1" -> "Receiver"
+                "2" -> "PC"
+                else -> label
+            }
+            val finalIcon = when (portNum) {
+                "1" -> getDrawable(R.drawable.ic_receiver)!!
+                "2" -> getDrawable(R.drawable.ic_pc)!!
+                else -> {
+                    val iconKey = hdmiIcon(label, named)
+                    val baseIcon = getDrawable(HDMI_ICONS[iconKey]!!)!!
+                    if (iconKey == "hdmi" && portNum.isNotEmpty()) numberedHdmiDrawable(baseIcon, portNum) else baseIcon
+                }
+            }
             App(
                 HDMI + port,
-                label,
+                customLabel,
                 Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(port)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                getDrawable(HDMI_ICONS[hdmiIcon(label, named)]!!)!!,
+                finalIcon,
                 offline = !named && tv.getInputState(port) != TvInputManager.INPUT_STATE_CONNECTED,
             )
-        }.distinctBy { it.pkg }
+        }.distinctBy { it.pkg }.sortedBy { it.pkg }
     } catch (e: Exception) {
         emptyList()
+    }
+
+    private fun numberedHdmiDrawable(base: Drawable, num: String): Drawable {
+        val size = dp(48)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val iconCopy = base.constantState?.newDrawable(resources)?.mutate() ?: base.mutate()
+        iconCopy.setTint(Color.WHITE)
+        val iconW = (size * 0.62f).toInt()
+        val iconH = (size * 0.42f).toInt()
+        val left = (size - iconW) / 2
+        val top = (size * 0.08f).toInt()
+        iconCopy.setBounds(left, top, left + iconW, top + iconH)
+        iconCopy.draw(c)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            textSize = size * 0.34f
+        }
+        c.drawText(num, size / 2f, size * 0.86f, p)
+        return BitmapDrawable(resources, bmp)
     }
 
     private val inputCallback = object : TvInputManager.TvInputCallback() {
@@ -2186,7 +2326,7 @@ class MainActivity : Activity() {
      * Every app, logo only, on the same 8-column grid as the Continue Watching cards (one card = two
      * tiles), so 8 show at once and the row scrolls for the rest. All apps and Settings are in the top bar.
      */
-    private fun rowAlign() = prefs.getString("row_align", "left")!!.takeIf { it in ROW_ALIGN } ?: "left"
+    private fun rowAlign() = prefs.getString("row_align", "centre")!!.takeIf { it in ROW_ALIGN } ?: "centre"
 
     /**
      * A row shorter than the screen sits left, centred or right. A longer row always starts at the left:
@@ -2207,13 +2347,14 @@ class MainActivity : Activity() {
         val takeFocus = currentFocus == null || currentFocus?.parent === appRow || firstFill
         val gap = dp(GRID_GAP)
         val width = rowTileWidth()
-        val tileH = if (isBannerStyle(iconStyle())) width * 9 / 16 else dp(76) // 16:9 like a banner
-        // The row sits on the bottom of its space. A banner row is shorter, so lift it by half the difference: its
-        // centre stays where the card row's is, between the clock and Continue Watching.
-        findViewById<View>(R.id.appScroll).apply {
-            (layoutParams as LinearLayout.LayoutParams).bottomMargin = dp(-24) + (dp(76) - tileH) / 2
-            requestLayout()
+        val tileH = if (isBannerStyle(iconStyle())) width * 9 / 16 else dp(44)
+        val dockRadius = dp(18).toFloat()
+        appRow.background = GradientDrawable().apply {
+            cornerRadius = dockRadius
+            setColor(if (dark) 0x580B0F17 else 0x70FFFFFF)
+            setStroke(1, if (dark) 0x36FFFFFF else 0x22000000)
         }
+        if (glassActive()) glass.add(appRow, dockRadius)
         appRow.removeAllViews()
         val hidden = rowHiddenSet()
         val tiles = sortedApps().filter { inRow(it.pkg, hidden) }.map { appTile(it, labeled = false) }
@@ -2248,8 +2389,8 @@ class MainActivity : Activity() {
     /** A brand or app colour made deep enough to carry a white mark. */
     private fun deepen(c: Int) = Color.rgb((Color.red(c) * 0.6f).toInt(), (Color.green(c) * 0.6f).toInt(), (Color.blue(c) * 0.6f).toInt())
 
-    /** Width of a home row tile: eight across the screen. */
-    private fun rowTileWidth() = (resources.displayMetrics.widthPixels - dp(96) - dp(GRID_GAP) * (ROW_TILES - 1)) / ROW_TILES
+    /** Width of a compact Apple dock icon tile. */
+    private fun rowTileWidth() = dp(44)
 
     /**
      * Apple TV style: the app's own banner fills the tile, rounded. Only when the banner is at least as wide as the
@@ -2313,7 +2454,7 @@ class MainActivity : Activity() {
             a.pkg.startsWith(HDMI) -> tile(name, a.icon, true, a.pkg,
                 tint = BRAND_COLOURS[hdmiIcon(a.label, true)]?.takeIf { colour }) { launch(a) }
             logo != null -> tile(name.takeIf { !logo.second }, getDrawable(logo.first)!!, true, a.pkg,
-                wordmarkInset = if (!logo.second) null else dp(if (labeled) 28 else 14),
+                wordmarkInset = if (!logo.second) null else dp(if (labeled) 14 else 6),
                 tint = if (onColour && BRAND_COLOURS[a.pkg] != null) Color.WHITE else BRAND_COLOURS[a.pkg]?.takeIf { colour }) { launch(a) }
                 .also { if (onColour) BRAND_COLOURS[a.pkg]?.let { c -> it.backgroundTintList = ColorStateList.valueOf(deepen(c)) } }
             else -> cachedGlyph(a)?.let { g ->
@@ -2360,7 +2501,7 @@ class MainActivity : Activity() {
             // after focus moved on is skipped, or it would show this old name while a newer tile is selected.
             val place = {
                 label.text = v.contentDescription
-                label.box = v.width // the name stays inside its tile: when it is wider it scrolls
+                label.box = dp(136)
                 label.translationX = v.left + v.width / 2f - label.width / 2f
                 label.setActive(true)
             }
@@ -2398,21 +2539,19 @@ class MainActivity : Activity() {
         val restText = if (dark) 0.65f else 1f
         img.alpha = restLogo
         text?.alpha = restText
-        style(col, dp(8), card = true) { focused ->
-            text?.setActive(focused) // a name too wide for the tile scrolls while it is selected
+        style(col, dp(11), card = true, lift = 1.2f) { focused ->
+            text?.setActive(focused)
             if (!dark) return@style
             img.animate().alpha(if (focused) 1f else restLogo).setDuration(160).start()
             text?.animate()?.alpha(if (focused) 1f else restText)?.setDuration(160)?.start()
         }
         if (text == null) {
-            // Icons share one height. Wordmarks sit in a square viewport, so fit them by width instead
-            // (crop the empty top and bottom) or they shrink to a sliver.
             if (wordmarkInset != null) {
                 img.scaleType = ImageView.ScaleType.CENTER_CROP
                 img.setPadding(wordmarkInset, 0, wordmarkInset, 0)
             } else {
-                val v = if (isBannerStyle(iconStyle())) dp(8) else dp(20) // banner rows are shorter
-                img.setPadding(dp(16), v, dp(16), v)
+                val v = if (isBannerStyle(iconStyle())) dp(5) else dp(10)
+                img.setPadding(dp(10), v, dp(10), v)
             }
             col.addView(img, LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         } else {
@@ -2551,28 +2690,28 @@ class MainActivity : Activity() {
         val top = alive(lastTop) ?: findViewById(R.id.launcherSettings)
         return when {
             v.parent === wifi.parent -> when (key) { // top bar
-                KeyEvent.KEYCODE_DPAD_DOWN -> apps ?: cards ?: v // the apps row can be empty (all hidden)
+                KeyEvent.KEYCODE_DPAD_DOWN -> cards ?: apps ?: v
                 KeyEvent.KEYCODE_DPAD_UP -> v
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.wifi) v else null
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.presetButton) v else null
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (v.id == R.id.launcherSettings) v else null
                 else -> null
             }
-            v.parent === appRow -> when (key) {
-                KeyEvent.KEYCODE_DPAD_UP -> top
-                KeyEvent.KEYCODE_DPAD_DOWN -> cards ?: v
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (appRow.indexOfChild(v) == 0) v else null
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (appRow.indexOfChild(v) == appRow.childCount - 1) v else null
-                else -> null
-            }
-            v.getTag(R.id.watchRow) is Prog -> {
+            v.getTag(R.id.watchRow) is Prog -> { // Continue Watching (above dock)
                 val i = watchRow.indexOfChild(v.parent as View)
                 when (key) {
-                    KeyEvent.KEYCODE_DPAD_UP -> apps ?: top
-                    KeyEvent.KEYCODE_DPAD_DOWN -> v
+                    KeyEvent.KEYCODE_DPAD_UP -> top
+                    KeyEvent.KEYCODE_DPAD_DOWN -> apps ?: v
                     KeyEvent.KEYCODE_DPAD_LEFT -> if (i == 0) v else null
                     KeyEvent.KEYCODE_DPAD_RIGHT -> if (i == watchRow.childCount - 1) v else null
                     else -> null
                 }
+            }
+            v.parent === appRow -> when (key) { // Bottom Apple Dock
+                KeyEvent.KEYCODE_DPAD_UP -> cards ?: top
+                KeyEvent.KEYCODE_DPAD_DOWN -> v
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (appRow.indexOfChild(v) == 0) v else null
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (appRow.indexOfChild(v) == appRow.childCount - 1) v else null
+                else -> null
             }
             else -> null
         }
@@ -3316,11 +3455,17 @@ class MainActivity : Activity() {
         val channels = on.flatMap { (id) ->
             readPrograms(TvContract.buildPreviewProgramsUriForChannel(id), hidden, "ch$id").map { (_, p) -> watchSortKey(0, prefs.getLong("t_${p.pkg}", 0)) to p }
         }
-        val all = watchNext + channels
+        var all = watchNext + channels
+        if (all.isEmpty()) {
+            val fallbackCh = appChannels().take(3).flatMap { (id) ->
+                readPrograms(TvContract.buildPreviewProgramsUriForChannel(id), hidden, "ch$id").take(3).map { (_, p) -> watchSortKey(0, prefs.getLong("t_${p.pkg}", 0)) to p }
+            }
+            all = fallbackCh
+        }
         publishingPkgs = all.mapNotNull { it.second.pkg }.toSet()
         val off = prefs.getStringSet("cw_off", emptySet())!!
         return newestPerApp(all.filter { it.second.pkg !in off }.distinctBy { it.second.intent ?: it.second.title }, PER_APP) { it.group }
-            .take(20)
+            .take(3)
     }
 
     /** Apps last seen publishing, so the settings list includes them even without the permission check. */
@@ -3484,9 +3629,8 @@ class MainActivity : Activity() {
         watchTitle.text = rowName()
         placeRow(animate = false)
         // ~16 ms per card here and only four show at once: the first four now, the next four on the next frame.
-        addCardsTo(3)
+        addCardsTo(2)
         watchRow.post { fitInk() }
-        ui.post { if (watchKey == key) addCardsTo(CARDS_AHEAD - 1) } // unless a newer list replaced this one
         if (focusedAt >= 0) {
             ((watchRow.getChildAt(focusedAt.coerceAtMost(watchRow.childCount - 1)) as? LinearLayout)?.getChildAt(0)
                 ?: appRow.getChildAt(0))?.requestFocus()
@@ -3511,28 +3655,17 @@ class MainActivity : Activity() {
     private fun placeRow(animate: Boolean) {
         val show = rowShow()
         val has = watchList.isNotEmpty()
-        val keepSpace = show != "always" && !rowDrops() // "Stays put": the apps keep their place, even with no shows
-        // With no shows, an invisible stand-in card holds the row's height, so the apps don't fall to the bottom.
-        if (!has && keepSpace && watchRow.childCount == 0) watchRow.addView(watchCard(Prog(" ", " ", 0, null, null, null), false))
-        else if (!has && !keepSpace && watchRow.childCount > 0) watchRow.removeAllViews()
-        val vis = when {
-            !has -> if (keepSpace) View.INVISIBLE else View.GONE
-            show == "never" -> if (rowDrops()) View.GONE else View.INVISIBLE // invisible keeps its space
-            else -> View.VISIBLE
-        }
+        val vis = if (!has || show == "never") View.GONE else View.VISIBLE
         if (watchScroll.visibility != vis) { watchTitle.visibility = vis; watchScroll.visibility = vis }
         val hidden = show == "down" && has && !rowOut
-        // From where the app row sits above the bottom row to where it would sit without it.
-        val drop = (watchScroll.bottom - appScroll.bottom).toFloat().coerceAtLeast(0f)
-        val appY = if (hidden && rowDrops()) drop else 0f
-        val rowY = if (!hidden) 0f else if (rowDrops()) drop else dp(24).toFloat()
+        val rowY = if (hidden) dp(12).toFloat() else 0f
         fun move(v: View, y: Float, a: Float) {
-            if (v.translationY == y && v.alpha == a) return // a layer for a view that doesn't move only costs frames
+            if (v.translationY == y && v.alpha == a) return
             if (animate) v.animate().translationY(y).alpha(a).setDuration(250).setInterpolator(DECELERATE).start()
             else { v.animate().cancel(); v.translationY = y; v.alpha = a }
         }
-        move(appsTitle, appY, appsTitle.alpha)
-        move(appScroll, appY, 1f)
+        move(appsTitle, 0f, appsTitle.alpha)
+        move(appScroll, 0f, 1f)
         move(watchTitle, rowY, if (hidden) 0f else titleAlpha)
         move(watchScroll, rowY, if (hidden) 0f else 1f)
     }
@@ -3553,8 +3686,9 @@ class MainActivity : Activity() {
      * title and details (source, episode, time left) go underneath.
      */
     private fun watchCard(p: Prog, gapBefore: Boolean): View {
-        val gap = dp(GRID_GAP)
-        val w = (resources.displayMetrics.widthPixels - dp(96) - gap * 3) / 4
+        val gap = dp(10)
+        val w = dp(104)
+        val h = dp(56)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -3566,16 +3700,15 @@ class MainActivity : Activity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(if (dark) DARK_SURFACE else 0xFFDDE1E5.toInt())
         }
-        // Long titles scroll while their poster is focused instead of staying cut off.
-        val title = label(p.title, 14f).apply {
-            setPadding(0, dp(6), 0, 0)
+        val title = label(p.title, 10f).apply {
+            setPadding(0, dp(3), 0, 0)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
             ink(this, watchInk)
         }
         val frame = FrameLayout(this)
-        style(frame, dp(8), card = true, lift = 1.1f) { focused ->
+        style(frame, dp(10), card = true, lift = 1.12f) { focused ->
             title.isSelected = focused
             if (focused) {
                 lastCard = frame
@@ -3585,27 +3718,25 @@ class MainActivity : Activity() {
         frame.contentDescription = p.title
         frame.addView(img, MATCH_PARENT, MATCH_PARENT)
         frame.setOnClickListener { open(p) }
-        frame.setTag(R.id.watchRow, p) // holding OK hides it (see onHold)
-        // 2:1 keeps logos and badges that providers bake into 16:9 art.
-        col.addView(frame, LinearLayout.LayoutParams(w, w / 2))
-        // Thin bar under the poster, card width. Kept (invisible) when there's no progress so titles line up.
+        frame.setTag(R.id.watchRow, p)
+        col.addView(frame, LinearLayout.LayoutParams(w, h))
         col.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = p.progress
             progressDrawable = progressBarDrawable()
             visibility = if (p.progress > 0) View.VISIBLE else View.INVISIBLE
-        }, LinearLayout.LayoutParams(w, dp(3)).apply { topMargin = dp(8) })
+        }, LinearLayout.LayoutParams(w, dp(2)).apply { topMargin = dp(5) })
         col.addView(title)
         val icon = sourceIcon(p.pkg)
         if (p.sub.isNotEmpty() || icon != null) {
-            col.addView(label(p.sub, 12f).apply {
+            col.addView(label(p.sub, 8.5f).apply {
                 ink(this, watchInk)
-                alpha = 0.8f
-                setPadding(0, dp(2), 0, 0)
+                alpha = 0.75f
+                setPadding(0, dp(1), 0, 0)
                 icon?.let {
-                    it.setBounds(0, 0, dp(12), dp(12))
+                    it.setBounds(0, 0, dp(10), dp(10))
                     setCompoundDrawablesRelative(it, null, null, null)
-                    compoundDrawablePadding = dp(6)
+                    compoundDrawablePadding = dp(4)
                 }
             })
         }
@@ -3840,7 +3971,7 @@ class MainActivity : Activity() {
         const val BADGE = 0xFFFF453A.toInt()
         // Dark mode tokens, for AMOLED: true black, and near-black cards that read as cards because their edge
         // catches light (brightest along the top), the way light-mode cards use a soft shadow.
-        const val DARK_BG = 0xFF000000.toInt() // home ground, settings panel, inset boxes
+        const val DARK_BG = 0xFF05070B.toInt() // home ground, settings panel, inset boxes
         const val DARK_SURFACE = 0xFF0B0B0B.toInt() // placeholders behind images
         const val DARK_TEXT = 0xFFF5F5F5.toInt()
         const val DARK_TEXT_2 = 0xFF7A7A7A.toInt() // values, unfocused rows, supporting text
@@ -3879,18 +4010,19 @@ class MainActivity : Activity() {
         const val WRITE_EPG ="com.android.providers.tv.permission.WRITE_EPG_DATA"
         const val TV_SETTINGS = "com.android.tv.settings"
         const val HDMI = "hdmi:" // App.pkg prefix for HDMI device tiles; the rest is the TV input id
-        const val ROW_TILES = 8
+        const val ROW_TILES = 14
         /** Icon style setting -> its name. */
         val ICON_STYLES = linkedMapOf(ICON_STYLE_KEYS[0] to R.string.monochrome, ICON_STYLE_KEYS[1] to R.string.colour, ICON_STYLE_KEYS[2] to R.string.banner, ICON_STYLE_KEYS[3] to R.string.banner_mono)
-        const val GRID_GAP = 16 // dp; shared by the apps row and the cards so their columns line up
+        const val GRID_GAP = 8 // dp; compact gap between icons inside the Apple dock
         /** Shown names for the wallpaper keys saved in prefs (the keys stay English). */
         val WALLPAPER_NAMES = mapOf(
             "Rockies (day)" to R.string.wp_rockies_day, "Rockies (dusk)" to R.string.wp_rockies_dusk,
             "Pure black" to R.string.wp_pure_black, "Soft white" to R.string.wp_soft_white,
         )
         val BUNDLED_WALLPAPERS = linkedMapOf(
-            "Rockies (day)" to R.drawable.wallpaper,
             "Rockies (dusk)" to R.drawable.wallpaper_dark,
+            "Sunset (dusk)" to R.drawable.wallpaper_preset2,
+            "Rockies (day)" to R.drawable.wallpaper,
         )
         val PIN_KEYS = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
@@ -3918,6 +4050,7 @@ class MainActivity : Activity() {
             "nintendoswitch" to 0xFFE60012.toInt(),
             "com.netflix.ninja" to 0xFFE50914.toInt(),
             "com.stremio.one" to 0xFF8D3DAF.toInt(),
+            "org.smarttube.stable" to 0xFFFF0000.toInt(),
             "io.gh.reisxd.tizentube.cobalt" to 0xFFFF0000.toInt(),
             "com.google.android.youtube.tv" to 0xFFFF0000.toInt(),
             "com.google.android.youtube.tvmusic" to 0xFFFF0000.toInt(),
