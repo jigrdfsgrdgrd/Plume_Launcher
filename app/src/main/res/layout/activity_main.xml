@@ -228,6 +228,7 @@
             android:layout_marginBottom="8dp"
             android:background="@drawable/bg_now_playing_pill"
             android:clickable="true"
+            android:descendantFocusability="blocksDescendants"
             android:focusable="true"
             android:gravity="center_vertical"
             android:orientation="horizontal"
@@ -277,6 +278,7 @@
                         android:layout_height="12dp"
                         android:layout_marginEnd="5dp"
                         android:src="@drawable/logo_spotify"
+                        android:tint="#1DB954"
                         android:visibility="gone" />
 
                     <TextView
@@ -304,7 +306,7 @@
                 <View
                     android:id="@+id/eqBar1"
                     android:layout_width="3.5dp"
-                    android:layout_height="12dp"
+                    android:layout_height="18dp"
                     android:background="@drawable/bg_eq_bar" />
 
                 <View
@@ -317,7 +319,7 @@
                 <View
                     android:id="@+id/eqBar3"
                     android:layout_width="3.5dp"
-                    android:layout_height="9dp"
+                    android:layout_height="18dp"
                     android:layout_marginStart="2.5dp"
                     android:background="@drawable/bg_eq_bar" />
             </LinearLayout>
@@ -329,9 +331,8 @@
                 android:layout_height="28dp"
                 android:layout_marginEnd="8dp"
                 android:alpha="0.9"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
+                android:clickable="false"
+                android:focusable="false"
                 android:importantForAccessibility="no"
                 android:padding="4dp"
                 android:src="@drawable/ic_pause" />
@@ -341,9 +342,8 @@
                 android:layout_width="28dp"
                 android:layout_height="28dp"
                 android:alpha="0.85"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
+                android:clickable="false"
+                android:focusable="false"
                 android:importantForAccessibility="no"
                 android:padding="4dp"
                 android:src="@drawable/ic_skip_next" />

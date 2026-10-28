@@ -429,6 +429,8 @@ class MainActivity : Activity() {
         // Only rebuild what changed, so focus stays where it was when returning from an app.
         if (appsDirty) refreshApps() else if (appRow.childCount == 0) renderApps()
         refreshWatchNext()
+        MediaBridge.requestRefresh?.invoke()
+        updateNowPlayingPill(MediaBridge.currentTrack)
         showWeather()
         ui.removeCallbacks(weatherTick)
         ui.post(weatherTick)
@@ -473,7 +475,8 @@ class MainActivity : Activity() {
         ui.removeCallbacks(wallpaperTick)
         ui.removeCallbacks(minuteTick)
         idleHandler.removeCallbacks(idleRunnable)
-        driftAnimator?.cancel()
+        stopParallaxDrift(immediate = true)
+        stopEqAnimation()
         if (editing) endEdit()
         super.onPause()
     }
@@ -778,7 +781,12 @@ class MainActivity : Activity() {
         if (settingsScrim.visibility == View.VISIBLE) closeLauncherSettings()
         if (allApps.visibility == View.VISIBLE) closeAllApps()
         watchScroll.scrollTo(0, 0)
-        appRow.getChildAt(0)?.requestFocus()
+        val pill = findViewById<View>(R.id.nowPlayingPill)?.takeIf { it.visibility == View.VISIBLE }
+        if (pill != null && appScroll.visibility != View.VISIBLE) {
+            pill.requestFocus()
+        } else {
+            appRow.getChildAt(0)?.requestFocus()
+        }
     }
 
     @Deprecated("Home screen: Back only closes overlays")
@@ -786,6 +794,9 @@ class MainActivity : Activity() {
         when {
             settingsScrim.visibility == View.VISIBLE -> pageBack?.invoke() ?: closeLauncherSettings()
             allApps.visibility == View.VISIBLE -> closeAllApps()
+            pillShown && appsExplicitlyShown && prefs.getString("now_playing_dock", "replace") == "replace" -> {
+                hideDockToPill()
+            }
         }
     }
 
@@ -837,9 +848,11 @@ class MainActivity : Activity() {
         } else choice
     }
 
-    private var driftAnimator: ValueAnimator? = null
+    private var isDrifting = false
+    private var driftStepIndex = 0
     private val idleHandler = Handler(Looper.getMainLooper())
     private val idleRunnable = Runnable { startParallaxDrift() }
+    private val driftStepRunnable = Runnable { stepParallaxOrbit() }
     private var lastDynamicIsDay: Boolean? = null
 
     private val minuteTick = object : Runnable {
@@ -855,135 +868,277 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Runs 100% on Android's native RenderThread via ViewPropertyAnimator!
+     * Zero per-frame UI-thread callbacks, zero layout invalidations.
+     */
     private fun startParallaxDrift() {
+        if (!resumed) return
         val rawWp = currentWallpaper()
         val curWp = resolveDynamicWallpaper(rawWp)
         val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
         if (!isApple || !prefs.getBoolean("ambient_drift", true)) return
+        if (settingsScrim.visibility == View.VISIBLE || allApps.visibility == View.VISIBLE) return
         val wp = findViewById<ImageView>(R.id.wallpaper) ?: return
         val fg = findViewById<ImageView>(R.id.mountainForeground) ?: return
-        if (settingsScrim.visibility == View.VISIBLE || allApps.visibility == View.VISIBLE) return
 
-        // Gentle scale so the smooth orbit never shows borders
-        wp.animate().scaleX(1.035f).scaleY(1.035f).setDuration(1200).start()
-        fg.animate().scaleX(1.035f).scaleY(1.035f).setDuration(1200).start()
+        isDrifting = true
+        driftStepIndex = 0
+        wp.animate().scaleX(1.035f).scaleY(1.035f).setDuration(2400L).setInterpolator(DECELERATE).start()
+        fg.animate().scaleX(1.035f).scaleY(1.035f).setDuration(2400L).setInterpolator(DECELERATE).start()
+        stepParallaxOrbit()
+    }
 
+    private fun stepParallaxOrbit() {
+        if (!isDrifting || !resumed) return
+        val wp = findViewById<ImageView>(R.id.wallpaper) ?: return
+        val fg = findViewById<ImageView>(R.id.mountainForeground) ?: return
         val maxDriftX = dp(8).toFloat()
         val maxDriftY = dp(4).toFloat()
 
-        driftAnimator?.cancel()
-        // Continuous, seamless 2D elliptical orbit over 110 seconds!
-        // No directional stops or abrupt reversals: velocity magnitude is never 0 in 2D space.
-        driftAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 110_000L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener { anim ->
-                val p = anim.animatedValue as Float
-                val angle = (p * 2.0 * Math.PI)
-                val dx = Math.sin(angle).toFloat() * maxDriftX
-                val dy = Math.cos(angle).toFloat() * maxDriftY
+        // 12-point smooth elliptical orbit (12 * 10s = 120s per revolution) on the GPU RenderThread
+        val angle = (driftStepIndex % 12) * (2.0 * Math.PI / 12.0)
+        driftStepIndex = (driftStepIndex + 1) % 12
+        val dx = Math.sin(angle).toFloat() * maxDriftX
+        val dy = Math.cos(angle).toFloat() * maxDriftY
 
-                wp.translationX = dx
-                wp.translationY = dy * 0.7f
-                fg.translationX = dx * 1.45f
-                fg.translationY = dy * 0.7f * 1.45f
-            }
-            start()
+        val segDuration = 10_000L
+        wp.animate()
+            .translationX(dx)
+            .translationY(dy * 0.7f)
+            .setDuration(segDuration)
+            .setInterpolator(LinearInterpolator())
+            .start()
+        fg.animate()
+            .translationX(dx * 1.45f)
+            .translationY(dy * 0.7f * 1.45f)
+            .setDuration(segDuration)
+            .setInterpolator(LinearInterpolator())
+            .start()
+
+        idleHandler.removeCallbacks(driftStepRunnable)
+        idleHandler.postDelayed(driftStepRunnable, segDuration)
+    }
+
+    private fun stopParallaxDrift(immediate: Boolean = false) {
+        idleHandler.removeCallbacks(driftStepRunnable)
+        if (!isDrifting && !immediate) return
+        isDrifting = false
+        val wp = findViewById<ImageView>(R.id.wallpaper)
+        val fg = findViewById<ImageView>(R.id.mountainForeground)
+        if (immediate) {
+            wp?.animate()?.cancel()
+            fg?.animate()?.cancel()
+            wp?.apply { translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f }
+            fg?.apply { translationX = 0f; translationY = 0f; scaleX = 1f; scaleY = 1f }
+        } else {
+            wp?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)
+                ?.setDuration(450L)?.setInterpolator(DECELERATE)?.start()
+            fg?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)
+                ?.setDuration(450L)?.setInterpolator(DECELERATE)?.start()
         }
     }
 
     private fun resetParallaxDrift() {
         idleHandler.removeCallbacks(idleRunnable)
-        if (driftAnimator != null) {
-            driftAnimator?.cancel()
-            driftAnimator = null
-            findViewById<ImageView>(R.id.wallpaper)?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(300)?.start()
-            findViewById<ImageView>(R.id.mountainForeground)?.animate()?.translationX(0f)?.translationY(0f)?.scaleX(1f)?.scaleY(1f)?.setDuration(300)?.start()
-        }
+        stopParallaxDrift(immediate = false)
         val rawWp = currentWallpaper()
         val curWp = resolveDynamicWallpaper(rawWp)
         val isApple = rawWp == "auto:apple" || curWp.startsWith("res:Apple")
         if (isApple && prefs.getBoolean("ambient_drift", true)) {
-            idleHandler.postDelayed(idleRunnable, 15_000L)
+            idleHandler.postDelayed(idleRunnable, 18_000L)
         }
     }
 
-    private var eqAnimator: ValueAnimator? = null
-    private var appsExplicitlyShown = false
+    private var eqAnimating = false
+    private var eqStep = 0
+    private val eqTickRunnable = object : Runnable {
+        override fun run() {
+            if (!eqAnimating || !resumed) return
+            val bar1 = findViewById<View>(R.id.eqBar1) ?: return
+            val bar2 = findViewById<View>(R.id.eqBar2) ?: return
+            val bar3 = findViewById<View>(R.id.eqBar3) ?: return
+            val s1 = when (eqStep % 4) { 0 -> 0.82f; 1 -> 0.32f; 2 -> 0.65f; else -> 0.40f }
+            val s2 = when (eqStep % 4) { 0 -> 0.40f; 1 -> 0.95f; 2 -> 0.35f; else -> 0.78f }
+            val s3 = when (eqStep % 4) { 0 -> 0.70f; 1 -> 0.38f; 2 -> 0.88f; else -> 0.28f }
+            eqStep++
+            // Pure GPU RenderThread scaleY transforms: 0 requestLayout() calls!
+            bar1.animate().scaleY(s1).setDuration(360L).setInterpolator(DECELERATE).start()
+            bar2.animate().scaleY(s2).setDuration(360L).setInterpolator(DECELERATE).start()
+            bar3.animate().scaleY(s3).setDuration(360L).setInterpolator(DECELERATE).start()
+            ui.postDelayed(this, 370L)
+        }
+    }
 
     private fun startEqAnimation(isPlaying: Boolean) {
         val bar1 = findViewById<View>(R.id.eqBar1) ?: return
         val bar2 = findViewById<View>(R.id.eqBar2) ?: return
         val bar3 = findViewById<View>(R.id.eqBar3) ?: return
-        eqAnimator?.cancel()
+        val pivot = dp(18).toFloat()
+        bar1.pivotY = pivot
+        bar2.pivotY = pivot
+        bar3.pivotY = pivot
         if (!isPlaying) {
-            bar1.layoutParams = bar1.layoutParams.apply { height = dp(4) }
-            bar2.layoutParams = bar2.layoutParams.apply { height = dp(4) }
-            bar3.layoutParams = bar3.layoutParams.apply { height = dp(4) }
+            stopEqAnimation()
             return
         }
-        val minH = dp(4).toFloat()
-        val maxH1 = dp(14).toFloat()
-        val maxH2 = dp(20).toFloat()
-        val maxH3 = dp(12).toFloat()
+        if (eqAnimating) return
+        eqAnimating = true
+        ui.removeCallbacks(eqTickRunnable)
+        ui.post(eqTickRunnable)
+    }
 
-        eqAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1200L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener { anim ->
-                val p = anim.animatedValue as Float
-                val h1 = minH + (maxH1 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 2.0).toFloat())
-                val h2 = minH + (maxH2 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 3.0 + 1.2).toFloat())
-                val h3 = minH + (maxH3 - minH) * (0.5f + 0.5f * Math.sin(p * 2 * Math.PI * 2.5 + 2.4).toFloat())
-                bar1.layoutParams = bar1.layoutParams.apply { height = h1.toInt() }
-                bar2.layoutParams = bar2.layoutParams.apply { height = h2.toInt() }
-                bar3.layoutParams = bar3.layoutParams.apply { height = h3.toInt() }
-            }
-            start()
+    private fun stopEqAnimation() {
+        eqAnimating = false
+        ui.removeCallbacks(eqTickRunnable)
+        val restScale = 0.22f
+        findViewById<View>(R.id.eqBar1)?.animate()?.scaleY(restScale)?.setDuration(250L)?.setInterpolator(DECELERATE)?.start()
+        findViewById<View>(R.id.eqBar2)?.animate()?.scaleY(restScale)?.setDuration(250L)?.setInterpolator(DECELERATE)?.start()
+        findViewById<View>(R.id.eqBar3)?.animate()?.scaleY(restScale)?.setDuration(250L)?.setInterpolator(DECELERATE)?.start()
+    }
+
+    private var pillShown = false
+    private var appsExplicitlyShown = false
+
+    private fun dispatchMediaKey(keyCode: Int) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+            val now = SystemClock.uptimeMillis()
+            am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+            am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
+        } catch (_: Exception) {}
+    }
+
+    private fun togglePlayPauseActiveTrack() {
+        val pill = findViewById<View>(R.id.nowPlayingPill)
+        pill?.animate()?.scaleX(0.96f)?.scaleY(0.96f)?.setDuration(90L)?.withEndAction {
+            val target = if (pill.isFocused) 1.05f else 1f
+            pill.animate().scaleX(target).scaleY(target).setDuration(220L).setInterpolator(DECELERATE).start()
+        }?.start()
+
+        val track = MediaBridge.currentTrack
+        val ctrl = track?.controller
+        if (ctrl != null) {
+            try {
+                if (track.isPlaying) ctrl.transportControls.pause()
+                else ctrl.transportControls.play()
+                return
+            } catch (_: Exception) {}
+        }
+        dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+    }
+
+    private fun skipTrackOnPill(next: Boolean) {
+        val pill = findViewById<View>(R.id.nowPlayingPill)
+        val nudge = dp(if (next) 10 else -10).toFloat()
+        pill?.animate()?.translationX(nudge)?.setDuration(110L)?.withEndAction {
+            pill.animate().translationX(0f).setDuration(260L).setInterpolator(DECELERATE).start()
+        }?.start()
+
+        val ctrl = MediaBridge.currentTrack?.controller
+        if (ctrl != null) {
+            try {
+                if (next) ctrl.transportControls.skipToNext()
+                else ctrl.transportControls.skipToPrevious()
+                return
+            } catch (_: Exception) {}
+        }
+        dispatchMediaKey(if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+    }
+
+    private fun revealDockFromPill(targetApp: View?) {
+        appsExplicitlyShown = true
+        if (appScroll.visibility != View.VISIBLE) {
+            appScroll.animate().cancel()
+            appScroll.alpha = 0f
+            appScroll.translationY = dp(18).toFloat()
+            appScroll.scaleX = 0.95f
+            appScroll.scaleY = 0.95f
+            appScroll.visibility = View.VISIBLE
+            appScroll.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(320L)
+                .setInterpolator(DECELERATE)
+                .start()
+        }
+        targetApp?.requestFocus()
+    }
+
+    private fun hideDockToPill() {
+        val pill = findViewById<View>(R.id.nowPlayingPill)?.takeIf { it.visibility == View.VISIBLE } ?: return
+        appsExplicitlyShown = false
+        pill.requestFocus()
+        if (prefs.getString("now_playing_dock", "replace") == "replace" && appScroll.visibility == View.VISIBLE) {
+            appScroll.animate().cancel()
+            appScroll.animate()
+                .alpha(0f)
+                .translationY(dp(14).toFloat())
+                .scaleX(0.96f)
+                .scaleY(0.96f)
+                .setDuration(240L)
+                .setInterpolator(DECELERATE)
+                .withEndAction {
+                    if (!appsExplicitlyShown && pillShown && prefs.getString("now_playing_dock", "replace") == "replace") {
+                        appScroll.visibility = View.GONE
+                        appScroll.alpha = 1f
+                        appScroll.translationY = 0f
+                        appScroll.scaleX = 1f
+                        appScroll.scaleY = 1f
+                    }
+                }
+                .start()
         }
     }
 
     private fun launchMediaApp(track: MediaTrackInfo?) {
         if (track == null) return
         try {
-            track.controller?.sessionActivity?.send()
-        } catch (e: Exception) {
-            val pkg = track.packageName
-            if (pkg.isNotEmpty()) {
-                val intent = packageManager.getLeanbackLaunchIntentForPackage(pkg)
-                    ?: packageManager.getLaunchIntentForPackage(pkg)
-                intent?.let { startActivity(it) }
+            val pi = track.controller?.sessionActivity
+            if (pi != null) {
+                pi.send()
+                return
+            }
+        } catch (_: Exception) {}
+        val pkg = track.packageName
+        if (pkg.isNotEmpty()) {
+            val intent = packageManager.getLeanbackLaunchIntentForPackage(pkg)
+                ?: packageManager.getLaunchIntentForPackage(pkg)
+            intent?.let {
+                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(it)
             }
         }
     }
 
     private fun initNowPlayingPill() {
         val pill = findViewById<LinearLayout>(R.id.nowPlayingPill) ?: return
+        val artView = findViewById<ImageView>(R.id.nowPlayingArt)
+        if (artView != null) {
+            artView.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
+                }
+            }
+            artView.clipToOutline = true
+        }
         pill.setOnClickListener {
-            val track = MediaBridge.currentTrack ?: return@setOnClickListener
-            // Toggle play/pause on simple click
-            if (track.isPlaying) track.controller?.transportControls?.pause()
-            else track.controller?.transportControls?.play()
+            togglePlayPauseActiveTrack()
         }
         pill.setOnLongClickListener {
-            launchMediaApp(MediaBridge.currentTrack)
+            if (!holdFired) fireHold(pill)
             true
         }
-        findViewById<View>(R.id.nowPlayingArt)?.setOnClickListener {
-            launchMediaApp(MediaBridge.currentTrack)
-        }
-        findViewById<View>(R.id.nowPlayingPlayPause)?.setOnClickListener {
-            val track = MediaBridge.currentTrack ?: return@setOnClickListener
-            if (track.isPlaying) track.controller?.transportControls?.pause()
-            else track.controller?.transportControls?.play()
-        }
-        findViewById<View>(R.id.nowPlayingNext)?.setOnClickListener {
-            MediaBridge.currentTrack?.controller?.transportControls?.skipToNext()
-        }
         pill.setOnFocusChangeListener { v, hasFocus ->
-            v.animate().scaleX(if (hasFocus) 1.05f else 1f).scaleY(if (hasFocus) 1.05f else 1f).setDuration(150).start()
+            v.animate()
+                .scaleX(if (hasFocus) 1.05f else 1f)
+                .scaleY(if (hasFocus) 1.05f else 1f)
+                .translationZ(if (hasFocus) dp(12).toFloat() else 0f)
+                .setDuration(220L)
+                .setInterpolator(DECELERATE)
+                .start()
         }
         MediaBridge.onMediaChanged = { track ->
             ui.post { updateNowPlayingPill(track) }
@@ -999,33 +1154,63 @@ class MainActivity : Activity() {
         val dockMode = prefs.getString("now_playing_dock", "replace") // "replace", "above", "off"
 
         if (dockMode == "off" || !isApple || track == null || track.title.isEmpty()) {
-            if (pill.visibility != View.GONE) {
-                pill.animate().alpha(0f).translationY(dp(8).toFloat()).setDuration(250).withEndAction {
-                    pill.visibility = View.GONE
-                }.start()
-            }
-            startEqAnimation(false)
+            val wasFocused = pill.hasFocus()
+            pillShown = false
             appsExplicitlyShown = false
+            startEqAnimation(false)
+            appScroll.animate().cancel()
+            appScroll.alpha = 1f
+            appScroll.translationY = 0f
+            appScroll.scaleX = 1f
+            appScroll.scaleY = 1f
             appScroll.visibility = View.VISIBLE
+            if (pill.visibility != View.GONE) {
+                pill.animate().cancel()
+                pill.animate()
+                    .alpha(0f)
+                    .translationY(dp(10).toFloat())
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(240L)
+                    .setInterpolator(DECELERATE)
+                    .withEndAction {
+                        if (!pillShown) pill.visibility = View.GONE
+                    }
+                    .start()
+            }
             placeRow(animate = true)
+            if (wasFocused) {
+                (lastApp?.takeIf { it.isAttachedToWindow && it.parent === appRow } ?: appRow.getChildAt(0))?.requestFocus()
+            }
             return
         }
 
-        // Hide Continue Watching while media is playing to keep screen clean
+        // Cancel any pending hide animation immediately so withEndAction never hides an active pill!
+        pill.animate().cancel()
+        val firstShow = !pillShown || pill.visibility != View.VISIBLE
+        pillShown = true
+
+        // Hide Continue Watching while media is playing to keep the lockscreen clean
         watchTitle.visibility = View.GONE
         watchScroll.visibility = View.GONE
 
-        // Dock replacement mode
-        if (dockMode == "replace" && !appsExplicitlyShown) {
-            appScroll.visibility = View.GONE
-        } else {
-            appScroll.visibility = View.VISIBLE
+        val focusInApps = currentFocus?.parent === appRow
+        val focusInWatch = currentFocus?.getTag(R.id.watchRow) != null
+
+        // If user is currently navigating inside appRow, keep appRow visible until they press Up
+        if (focusInApps) {
+            appsExplicitlyShown = true
         }
 
         findViewById<TextView>(R.id.nowPlayingTitle)?.text = track.title
         val artistView = findViewById<TextView>(R.id.nowPlayingArtist)
         val isSpotify = track.packageName.contains("spotify", ignoreCase = true)
-        val appName = if (isSpotify) "Spotify" else if (track.packageName.contains("youtube", ignoreCase = true)) "YouTube" else ""
+        val appName = when {
+            isSpotify -> "Spotify"
+            track.packageName.contains("youtube", ignoreCase = true) || track.packageName.contains("smarttube", ignoreCase = true) || track.packageName.contains("tizentube", ignoreCase = true) -> "YouTube"
+            track.packageName.contains("twitch", ignoreCase = true) -> "Twitch"
+            else -> ""
+        }
         val subtitle = listOfNotNull(appName.takeIf { it.isNotEmpty() }, track.artist.takeIf { it.isNotEmpty() }).joinToString(" · ")
         artistView?.text = if (subtitle.isNotEmpty()) subtitle else track.packageName
 
@@ -1033,6 +1218,7 @@ class MainActivity : Activity() {
         if (appIcon != null) {
             if (isSpotify) {
                 appIcon.setImageResource(R.drawable.logo_spotify)
+                appIcon.setColorFilter(0xFF1DB954.toInt())
                 appIcon.visibility = View.VISIBLE
             } else {
                 appIcon.visibility = View.GONE
@@ -1041,18 +1227,12 @@ class MainActivity : Activity() {
 
         val artView = findViewById<ImageView>(R.id.nowPlayingArt)
         if (artView != null) {
-            artView.outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
-                }
-            }
-            artView.clipToOutline = true
             if (track.art != null) {
                 artView.setImageBitmap(track.art)
             } else {
                 try {
                     artView.setImageDrawable(packageManager.getApplicationIcon(track.packageName))
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     artView.setImageResource(R.drawable.logo_spotify)
                 }
             }
@@ -1063,11 +1243,39 @@ class MainActivity : Activity() {
 
         startEqAnimation(track.isPlaying)
 
-        if (pill.visibility != View.VISIBLE) {
+        if (firstShow) {
             pill.alpha = 0f
-            pill.translationY = dp(8).toFloat()
+            pill.translationY = dp(12).toFloat()
+            pill.scaleX = 0.94f
+            pill.scaleY = 0.94f
             pill.visibility = View.VISIBLE
-            pill.animate().alpha(1f).translationY(0f).setDuration(300).start()
+            pill.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(if (pill.isFocused) 1.05f else 1f)
+                .scaleY(if (pill.isFocused) 1.05f else 1f)
+                .setDuration(320L)
+                .setInterpolator(DECELERATE)
+                .start()
+        } else {
+            pill.visibility = View.VISIBLE
+            pill.alpha = 1f
+            pill.translationY = 0f
+        }
+
+        // Dock replacement choreography: never steal focus up to the top bar!
+        if (dockMode == "replace" && !appsExplicitlyShown) {
+            appScroll.animate().cancel()
+            appScroll.visibility = View.GONE
+            if (focusInWatch || currentFocus == null) {
+                pill.requestFocus()
+            }
+        } else {
+            appScroll.visibility = View.VISIBLE
+            appScroll.alpha = 1f
+            appScroll.translationY = 0f
+            appScroll.scaleX = 1f
+            appScroll.scaleY = 1f
         }
     }
 
@@ -1081,6 +1289,8 @@ class MainActivity : Activity() {
             return
         }
         loadWallpaper()
+        updateNowPlayingPill(MediaBridge.currentTrack)
+        resetParallaxDrift()
         toast(APPLE_PRESETS.first { it.first == next }.second)
     }
 
@@ -2751,7 +2961,14 @@ class MainActivity : Activity() {
         }
         showNames()
         alignRow()
-        if (takeFocus) (tiles.firstOrNull { it.tag == focusedTag } ?: tiles[0]).requestFocus()
+        if (takeFocus) {
+            val pill = findViewById<View>(R.id.nowPlayingPill)?.takeIf { it.visibility == View.VISIBLE }
+            if (pill != null && appScroll.visibility != View.VISIBLE) {
+                pill.requestFocus()
+            } else {
+                (tiles.firstOrNull { it.tag == focusedTag } ?: tiles[0]).requestFocus()
+            }
+        }
         if (!prefs.getBoolean("tip_move", false)) {
             prefs.edit().putBoolean("tip_move", true).apply()
             toast(getString(R.string.tip_move), long = true)
@@ -2882,7 +3099,13 @@ class MainActivity : Activity() {
             val place = {
                 label.text = v.contentDescription
                 label.box = dp(136)
-                label.translationX = v.left + v.width / 2f - label.width / 2f
+                val targetX = v.left + v.width / 2f - label.width / 2f
+                if (label.alpha > 0.15f && Math.abs(label.translationX - targetX) < dp(320)) {
+                    label.animate().translationX(targetX).setDuration(170L).setInterpolator(DECELERATE).start()
+                } else {
+                    label.animate().cancel()
+                    label.translationX = targetX
+                }
                 label.setActive(true)
             }
             if (v.width > 0 && label.width > 0) place() else v.post { if (v.isFocused) place() }
@@ -3027,7 +3250,9 @@ class MainActivity : Activity() {
      * listener in style() is a fallback for remotes that send no repeats. [holdFired] stops both firing.
      */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
-        resetParallaxDrift()
+        if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) {
+            resetParallaxDrift()
+        }
         val confirm = e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER ||
             e.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (confirm) {
@@ -3074,17 +3299,17 @@ class MainActivity : Activity() {
             v.id == R.id.nowPlayingPill -> when (key) {
                 KeyEvent.KEYCODE_DPAD_UP -> top
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    // Reveal apps when pressing Down from the Live Activity player!
-                    appsExplicitlyShown = true
-                    appScroll.visibility = View.VISIBLE
+                    revealDockFromPill(apps)
                     apps ?: v
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    // Quick skip next track on remote right arrow
-                    MediaBridge.currentTrack?.controller?.transportControls?.skipToNext()
+                    skipTrackOnPill(next = true)
                     v
                 }
-                KeyEvent.KEYCODE_DPAD_LEFT -> v
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    skipTrackOnPill(next = false)
+                    v
+                }
                 else -> null
             }
             v.parent === wifi.parent -> when (key) { // top bar
@@ -3105,7 +3330,14 @@ class MainActivity : Activity() {
                 }
             }
             v.parent === appRow -> when (key) { // Bottom Apple Dock
-                KeyEvent.KEYCODE_DPAD_UP -> pill ?: cards ?: top
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    if (pill != null) {
+                        hideDockToPill()
+                        pill
+                    } else {
+                        cards ?: top
+                    }
+                }
                 KeyEvent.KEYCODE_DPAD_DOWN -> v
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (appRow.indexOfChild(v) == 0) v else null
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (appRow.indexOfChild(v) == appRow.childCount - 1) v else null
@@ -3132,6 +3364,7 @@ class MainActivity : Activity() {
     private fun onHold(v: View) {
         val tag = v.tag as? String
         when {
+            v.id == R.id.nowPlayingPill -> launchMediaApp(MediaBridge.currentTrack)
             allApps.visibility == View.VISIBLE && tag != null -> unlock { // grid: pin to the front of the row (unhiding it)
                 prefs.edit().putStringSet("row_hidden", rowHiddenSet() - tag).apply()
                 saveOrder(listOf(tag) + sortedApps().map { it.pkg }.filter { it != tag })
@@ -4093,6 +4326,17 @@ class MainActivity : Activity() {
      * slide (translationY on a layer), so the move costs no layout or redraw, even on a slow TV.
      */
     private fun placeRow(animate: Boolean) {
+        if (pillShown) {
+            watchTitle.visibility = View.GONE
+            watchScroll.visibility = View.GONE
+            val dockMode = prefs.getString("now_playing_dock", "replace")
+            if (dockMode == "replace" && !appsExplicitlyShown) {
+                appScroll.visibility = View.GONE
+            } else {
+                appScroll.visibility = View.VISIBLE
+            }
+            return
+        }
         val show = rowShow()
         val has = watchList.isNotEmpty()
         val vis = if (!has || show == "never") View.GONE else View.VISIBLE
@@ -4101,7 +4345,7 @@ class MainActivity : Activity() {
         val rowY = if (hidden) dp(12).toFloat() else 0f
         fun move(v: View, y: Float, a: Float) {
             if (v.translationY == y && v.alpha == a) return
-            if (animate) v.animate().translationY(y).alpha(a).setDuration(250).setInterpolator(DECELERATE).start()
+            if (animate) v.animate().translationY(y).alpha(a).setDuration(260).setInterpolator(DECELERATE).start()
             else { v.animate().cancel(); v.translationY = y; v.alpha = a }
         }
         move(appsTitle, 0f, appsTitle.alpha)
@@ -4288,7 +4532,7 @@ class MainActivity : Activity() {
             v.animate()
                 .scaleX(if (focused) lift else 1f).scaleY(if (focused) lift else 1f)
                 .translationZ(if (focused) dp(14).toFloat() else 0f)
-                .setDuration(160).setInterpolator(DECELERATE).start()
+                .setDuration(210L).setInterpolator(DECELERATE).start()
             onFocus?.invoke(focused)
         }
     }
@@ -4482,7 +4726,7 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
         )
         val GREYSCALE = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-        val DECELERATE = android.view.animation.DecelerateInterpolator(1.5f)
+        val DECELERATE = android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f)
         @Volatile var APPS: List<App>? = null
         @Volatile var SOURCES: List<App>? = null
         /** Mono marks made by glyph(), by package; null = icon has no usable symbol. Main thread only. */

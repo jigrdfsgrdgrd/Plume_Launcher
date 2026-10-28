@@ -18,6 +18,7 @@ object MediaBridge {
         private set
 
     var onMediaChanged: ((MediaTrackInfo?) -> Unit)? = null
+    var requestRefresh: (() -> Unit)? = null
 
     fun updateTrack(track: MediaTrackInfo?) {
         currentTrack = track
