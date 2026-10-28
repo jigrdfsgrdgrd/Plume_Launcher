@@ -848,29 +848,22 @@ class MainActivity : Activity() {
                 clock.layoutParams = this
             }
             clock.apply {
-                isAppleLockScreen = true
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 134f)
                 letterSpacing = -0.02f
                 setPadding(dp(8), 0, dp(8), dp(4))
+                setTextColor(if (isDusk) 0xFFFFFDFB.toInt() else 0xFFFFFFFF.toInt())
                 val dens = resources.displayMetrics.density
-                glassShadowRadius = 14f * dens
-                glassShadowDy = 2.5f * dens
-                glassShadowColor = 0x48000000
-                rimWidth = 0.8f * dens
-                rimTop = 0x99FFFFFF.toInt()
-                washTop = 0xFFFFFFFF.toInt()
-                washBottom = if (isDusk) 0xFFFFF0E6.toInt() else 0xFFF0F5FA.toInt()
+                setShadowLayer(6f * dens, 0f, 1.5f * dens, 0x66000000)
                 invalidate()
             }
             date.apply {
-                isAppleLockScreen = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 isAllCaps = false
                 letterSpacing = 0.02f
                 alpha = 0.95f
                 setTextColor(if (isDusk) 0xFFFFF2EB.toInt() else 0xFFF2F6FF.toInt())
                 val dens = resources.displayMetrics.density
-                setShadowLayer(8f * dens, 0f, 1.5f * dens, 0x40000000)
+                setShadowLayer(5f * dens, 0f, 1f * dens, 0x44000000)
                 invalidate()
             }
         } else {
@@ -887,7 +880,6 @@ class MainActivity : Activity() {
             val clockCol = if (isSunset) 0xFFFFEFE0.toInt() else 0xFFF2F6FF.toInt()
             val dateCol = if (isSunset) 0xFFF2C8B0.toInt() else 0xFFE6F0FF.toInt()
             clock.apply {
-                isAppleLockScreen = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 118f)
                 letterSpacing = -0.03f
                 setPadding(0, 0, 0, 0)
@@ -896,7 +888,6 @@ class MainActivity : Activity() {
                 invalidate()
             }
             date.apply {
-                isAppleLockScreen = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 isAllCaps = true
                 letterSpacing = 0.06f
