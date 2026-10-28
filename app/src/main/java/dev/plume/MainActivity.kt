@@ -839,7 +839,7 @@ class MainActivity : Activity() {
         if (isApple) {
             val isDusk = choice == "res:Apple Dusk"
             (box.layoutParams as? FrameLayout.LayoutParams)?.apply {
-                topMargin = dp(24)
+                topMargin = dp(40)
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 box.layoutParams = this
             }

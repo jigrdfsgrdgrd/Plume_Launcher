@@ -78,12 +78,14 @@ class GlassClock @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = 
             p.style = Paint.Style.STROKE
             p.strokeJoin = Paint.Join.ROUND
             p.strokeWidth = rimWidth * 2f
+            p.color = 0xFFFFFFFF.toInt()
             p.shader = LinearGradient(0f, textTop, 0f, textBottom, rimTop, 0x1AFFFFFF, Shader.TileMode.CLAMP)
             lay.draw(canvas)
         }
 
         // 3. Apple Lock Screen luminous frosted gradient fill
         p.style = Paint.Style.FILL
+        p.color = 0xFFFFFFFF.toInt()
         p.shader = LinearGradient(0f, textTop, 0f, textBottom, washTop, washBottom, Shader.TileMode.CLAMP)
         lay.draw(canvas)
 
