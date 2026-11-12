@@ -277,6 +277,7 @@
         <item quantity="other">%d keys</item>
     </plurals>
     <string name="clock_font">Lock Screen Font</string>
+    <string name="clock_depth_effect">Uhr-Tiefeneffekt (3D-Horizont)</string>
     <string name="ambient_drift">Cinematic Parallax Drift</string>
     <string name="live_activity">Live Activity (Now Playing)</string>
     <string name="font_bold">Bold (Apple Default)</string>
@@ -287,4 +288,12 @@
     <string name="dock_replace">Dock ersetzen (Apple Clean)</string>
     <string name="dock_above">Über Dock anzeigen</string>
     <string name="dock_off">Aus</string>
+    <string name="home_style">Home Screen Stil</string>
+    <string name="style_tvos">Apple TV (Clean)</string>
+    <string name="style_lockscreen">iOS Sperrbildschirm (Große Uhr)</string>
+    <string name="help_home_style">Minimalistischer Apple TV Modus mit vollem 4K-Wallpaper oder iOS-Sperrbildschirm mit 3D-Uhr.</string>
+    <string name="open_google_tv">Google TV Oberfläche öffnen</string>
+    <string name="google_photos_ambient">Google Fotos Screensaver anpassen</string>
+    <string name="sleep_tv">Bildschirm ausschalten (Standby)</string>
+    <string name="ambient_settings_failed">Bildschirmschoner-Einstellungen konnten nicht geöffnet werden.</string>
 </resources>

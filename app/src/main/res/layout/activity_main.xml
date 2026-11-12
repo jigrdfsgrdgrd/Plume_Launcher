@@ -6,12 +6,26 @@
     android:layout_height="match_parent"
     android:background="#05070B">
 
+    <SurfaceView
+        android:id="@+id/videoWallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
     <ImageView
         android:id="@+id/wallpaper"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:importantForAccessibility="no"
         android:scaleType="centerCrop" />
+
+    <!-- Subtle cinematic exposure & contrast control layer over videos/wallpapers -->
+    <View
+        android:id="@+id/wallpaperDimOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#26000000"
+        android:importantForAccessibility="no" />
 
     <!-- Layer 1: Giant Apple-style 3D Clock in the upper sky, tucked behind the mountain foreground layer -->
     <LinearLayout
@@ -25,8 +39,11 @@
         android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/weatherContainer"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -93,103 +110,156 @@
         android:paddingEnd="36dp"
         android:paddingBottom="12dp">
 
-        <!-- Subtle top-right control bar -->
+        <!-- Subtle tvOS top bar: clean time and control icons -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="end|center_vertical"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <View
+            <dev.plume.GlassClock
+                android:id="@+id/headerClock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:format12Hour="h:mm"
+                android:format24Hour="HH:mm"
+                android:letterSpacing="0.02"
+                android:textColor="#FFFFFF"
+                android:textSize="14.5sp"
+                android:visibility="gone" />
+
+                        <View
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
+            <TextView
+                android:id="@+id/sleepTimerBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_now_playing_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="⏱️ 45m"
+                android:textColor="#FFD166"
+                android:textSize="11.5sp"
+                android:visibility="gone" />
+
+            <!-- Authentic Apple TV Control Center Capsule (Profile + Clock) -->
+            <LinearLayout
+                android:id="@+id/ccCapsule"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_now_playing_pill"
+                android:clickable="true"
+                android:contentDescription="@string/plume_settings"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="2dp">
+
+                <TextView
+                    android:id="@+id/topAvatar"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:background="@drawable/bg_now_playing_pill"
+                    android:fontFamily="sans-serif-bold"
+                    android:gravity="center"
+                    android:text="J"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <dev.plume.GlassClock
+                    android:id="@+id/topClock"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:format12Hour="h:mm"
+                    android:format24Hour="HH:mm"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.02"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13.5sp" />
+            </LinearLayout>
+
+            <!-- Kept invisible for code compatibility -->
+            <ImageView
+                android:id="@+id/launcherSettings"
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:src="@drawable/ic_tune"
+                android:visibility="gone" />
+
             <ImageView
                 android:id="@+id/presetButton"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginEnd="6dp"
-                android:alpha="0.6"
-                android:contentDescription="Preset wechseln"
-                android:focusable="true"
-                android:padding="6dp"
-                android:src="@drawable/ic_preset" />
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:src="@drawable/ic_preset"
+                android:visibility="gone" />
 
             <ImageView
                 android:id="@+id/wifi"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:alpha="0.6"
-                android:contentDescription="@string/network_settings"
-                android:focusable="true"
-                android:padding="6dp"
-                android:src="@drawable/ic_wifi" />
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:src="@drawable/ic_wifi"
+                android:visibility="gone" />
 
             <ImageView
                 android:id="@+id/sourcesButton"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="6dp"
-                android:alpha="0.6"
-                android:contentDescription="@string/sources"
-                android:focusable="true"
-                android:padding="6dp"
+                android:layout_width="1dp"
+                android:layout_height="1dp"
                 android:src="@drawable/ic_sources"
                 android:visibility="gone" />
 
             <ImageView
                 android:id="@+id/allAppsButton"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="6dp"
-                android:alpha="0.6"
-                android:contentDescription="@string/all_apps"
-                android:focusable="true"
-                android:padding="6dp"
-                android:src="@drawable/ic_apps" />
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:src="@drawable/ic_apps"
+                android:visibility="gone" />
 
             <ImageView
                 android:id="@+id/systemSettings"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="6dp"
-                android:alpha="0.6"
-                android:contentDescription="@string/settings"
-                android:focusable="true"
-                android:padding="6dp"
-                android:src="@drawable/ic_settings" />
-
-            <ImageView
-                android:id="@+id/launcherSettings"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="6dp"
-                android:alpha="0.6"
-                android:contentDescription="@string/plume_settings"
-                android:focusable="true"
-                android:padding="6dp"
-                android:src="@drawable/ic_tune" />
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:src="@drawable/ic_settings"
+                android:visibility="gone" />
         </LinearLayout>
+
 
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
 
-<!-- Compact Continue Watching row sitting right ABOVE the bottom Apple Dock -->
+        <!-- Apple TV Top Shelf: Continue Watching / Up Next (flush left-aligned with Dock, tight spacing) -->
         <TextView
             android:id="@+id/watchTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
             android:layout_marginBottom="2dp"
-            android:alpha="0.65"
+            android:alpha="0.88"
             android:fontFamily="sans-serif-medium"
-            android:letterSpacing="0.05"
+            android:letterSpacing="0.06"
+            android:shadowColor="#E6000000"
+            android:shadowDx="0"
+            android:shadowDy="2"
+            android:shadowRadius="6"
             android:text="@string/continue_watching"
             android:textAllCaps="true"
-            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:textSize="10.5sp"
             android:visibility="gone" />
 
         <dev.plume.SnapScrollView
@@ -197,15 +267,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="-16dp"
-            android:layout_marginTop="-8dp"
+            android:layout_marginTop="-2dp"
             android:layout_marginEnd="-16dp"
-            android:layout_marginBottom="-2dp"
+            android:layout_marginBottom="-4dp"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingStart="16dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="8dp"
+            android:paddingStart="30dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="30dp"
+            android:paddingBottom="6dp"
             android:scrollbars="none"
             android:visibility="gone">
 
@@ -213,7 +283,7 @@
                 android:id="@+id/watchRow"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
+                android:layout_gravity="start"
                 android:clipChildren="false"
                 android:clipToPadding="false"
                 android:orientation="horizontal" />
@@ -360,7 +430,7 @@
             android:textSize="12sp"
             android:visibility="gone" />
 
-        <!-- Sleek miniature Apple Dock at the very bottom -->
+                <!-- Sleek tvOS Squircle App Row at bottom -->
         <dev.plume.SnapScrollView
             android:id="@+id/appScroll"
             android:layout_width="match_parent"
@@ -368,13 +438,13 @@
             android:layout_marginStart="-16dp"
             android:layout_marginTop="-8dp"
             android:layout_marginEnd="-16dp"
-            android:layout_marginBottom="-8dp"
+            android:layout_marginBottom="0dp"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingStart="16dp"
-            android:paddingTop="14dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="10dp"
+            android:paddingStart="24dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="8dp"
             android:scrollbars="none">
 
             <LinearLayout
@@ -392,31 +462,32 @@
                     android:clipChildren="false"
                     android:clipToPadding="false"
                     android:orientation="horizontal"
-                    android:paddingStart="10dp"
-                    android:paddingTop="8dp"
-                    android:paddingEnd="10dp"
-                    android:paddingBottom="8dp" />
+                    android:paddingStart="6dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="4dp" />
 
                 <!-- Name of the focused app, slid under its tile (tvOS style). -->
                 <dev.plume.FittingLabel
                     android:id="@+id/rowLabel"
-                    android:layout_width="140dp"
-                    android:layout_height="16dp"
-                    android:layout_marginTop="4dp"
+                    android:layout_width="148dp"
+                    android:layout_height="22dp"
+                    android:layout_marginTop="6dp"
                     android:alpha="0"
                     android:gravity="center"
                     android:maxLines="1"
-                    android:textSize="11sp" />
+                    android:textColor="#FFFFFF"
+                    android:textSize="12.5sp" />
 
                 <!-- "App names: Always": every name under its tile, in place of rowLabel (same space). -->
                 <LinearLayout
                     android:id="@+id/nameRow"
                     android:layout_width="wrap_content"
-                    android:layout_height="16dp"
-                    android:layout_marginTop="4dp"
+                    android:layout_height="22dp"
+                    android:layout_marginTop="6dp"
                     android:orientation="horizontal"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="10dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
                     android:visibility="gone" />
             </LinearLayout>
         </dev.plume.SnapScrollView>
@@ -442,21 +513,47 @@
             android:clipChildren="false"
             android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/allAppsTitle"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:fontFamily="sans-serif"
-                android:text="@string/all_apps"
-                android:textSize="20sp" />
+                android:layout_marginBottom="14dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/allAppsTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif"
+                    android:text="@string/all_apps"
+                    android:textSize="20sp" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <HorizontalScrollView
+                    android:id="@+id/allAppsCategoryScroll"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/allAppsCategoryRow"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal" />
+                </HorizontalScrollView>
+            </LinearLayout>
 
             <GridLayout
                 android:id="@+id/allAppsGrid"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:clipChildren="false"
-                android:columnCount="8" />
+                android:columnCount="6" />
         </LinearLayout>
     </ScrollView>
 
@@ -471,21 +568,21 @@
 
         <dev.plume.GlassBox
             android:id="@+id/settingsPanel"
-            android:layout_width="400dp"
+            android:layout_width="380dp"
             android:layout_height="match_parent"
             android:layout_gravity="end"
             android:orientation="vertical"
-            android:paddingStart="28dp"
-            android:paddingTop="40dp"
-            android:paddingEnd="48dp"
-            android:paddingBottom="27dp">
+            android:paddingStart="24dp"
+            android:paddingTop="36dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="24dp">
 
             <TextView
                 android:id="@+id/settingsCrumb"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:paddingStart="14dp"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:visibility="gone" />
 
             <TextView
@@ -495,12 +592,12 @@
                 android:fontFamily="sans-serif-medium"
                 android:paddingStart="14dp"
                 android:text="@string/plume_settings"
-                android:textSize="20sp" />
+                android:textSize="19sp" />
 
             <ScrollView
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="14dp"
                 android:layout_weight="1"
                 android:scrollbars="none">
 
@@ -515,13 +612,269 @@
                 android:id="@+id/settingsHelp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:visibility="gone" />
+        </dev.plume.GlassBox>
+    </FrameLayout>
+
+    <!-- tvOS Floating Pill Control Center Overlay -->
+    <FrameLayout
+        android:id="@+id/controlCenterScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#55000000"
+        android:clickable="true"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:visibility="gone">
+
+        <dev.plume.GlassBox
+            android:id="@+id/controlCenterPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|top"
+            android:layout_marginTop="32dp"
+            android:layout_marginEnd="44dp"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <!-- Hidden legacy Profile & Device Header (kept for ID compatibility) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/ccAvatar"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="@drawable/bg_now_playing_pill"
+                    android:fontFamily="sans-serif-bold"
+                    android:gravity="center"
+                    android:text="J"
+                    android:textColor="#FFFFFF"
+                    android:textSize="19sp" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/ccUserName"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:text="Julius"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16.5sp" />
+
+                    <TextView
+                        android:id="@+id/ccDeviceSubtitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:fontFamily="sans-serif"
+                        android:text="Apple TV 4K · Wohnzimmer"
+                        android:textColor="#8EA4C0"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/ccClock"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15.5sp" />
+            </LinearLayout>
+
+            <!-- Control Center 4x2 Pill Grid -->
+            <GridLayout
+                android:id="@+id/ccGrid"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:columnCount="2" />
+
+            <!-- Bottom Row of 4 Rounded Square Action Buttons -->
+            <LinearLayout
+                android:id="@+id/ccBottomRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+
+            <TextView
+                android:id="@+id/ccHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+        </dev.plume.GlassBox>
+    </FrameLayout>
+
+    <!-- Apple TV Fullscreen Aerial Caption (bottom-left during fullscreen screensaver mode) -->
+    <LinearLayout
+        android:id="@+id/aerialCaptionBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="42dp"
+        android:layout_marginBottom="34dp"
+        android:alpha="0"
+        android:importantForAccessibility="no"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/aerialCaptionTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.01"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="2"
+            android:shadowRadius="8"
+            android:textColor="#F5FFFFFF"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/aerialCaptionSub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="sans-serif"
+            android:letterSpacing="0.02"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="6"
+            android:textColor="#B8E6F0FF"
+            android:textSize="12.5sp" />
+    </LinearLayout>
+
+    <!-- Apple Weather Modal Popup -->
+    <FrameLayout
+        android:id="@+id/weatherModalScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:clickable="true"
+        android:visibility="gone">
+
+        <dev.plume.GlassBox
+            android:id="@+id/weatherModalBox"
+            android:layout_width="480dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="32dp"
+            android:paddingTop="28dp"
+            android:paddingEnd="32dp"
+            android:paddingBottom="28dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/weatherModalCity"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:fontFamily="sans-serif-medium"
+                    android:textColor="#FFFFFF"
+                    android:textSize="19sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif"
+                    android:letterSpacing="0.08"
+                    android:text="WETTER"
+                    android:textAllCaps="true"
+                    android:textColor="#8EA4C0"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/weatherModalEmoji"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="48sp" />
+
+                <TextView
+                    android:id="@+id/weatherModalTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:fontFamily="sans-serif-black"
+                    android:textColor="#FFFFFF"
+                    android:textSize="48sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/weatherModalCondition"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="4dp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="#E6F0FF"
+                android:textSize="16sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="16dp"
+                android:background="#20FFFFFF" />
+
+            <!-- 3 Badges: Feels like, Humidity, Wind -->
+            <LinearLayout
+                android:id="@+id/weatherModalBadges"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="horizontal" />
+
+            <TextView
+                android:id="@+id/weatherModalRange"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:lineSpacingMultiplier="1.15"
-                android:maxLines="3"
-                android:minLines="3"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
+                android:gravity="center"
+                android:textColor="#8EA4C0"
                 android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/weatherModalCloseHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:text="Drücke Zurück zum Schließen"
+                android:textColor="#66FFFFFF"
+                android:textSize="11.5sp" />
         </dev.plume.GlassBox>
     </FrameLayout>
 </FrameLayout>

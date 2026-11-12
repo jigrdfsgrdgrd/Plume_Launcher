@@ -33,6 +33,7 @@ class HomeOverride : AccessibilityService() {
         screenReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    allowGoogleTv = false
                     handler.postDelayed({
                         val topPkg = rootInActiveWindow?.packageName?.toString()
                         if (topPkg == GOOGLE_TV || topPkg == SETUP_WRAITH) {
@@ -59,10 +60,11 @@ class HomeOverride : AccessibilityService() {
      * Home is then caught by the Google TV window watcher below, which shows Google TV for about a second.
      */
     fun applyKeyFilter() {
+        val info = serviceInfo ?: return
         val filter = !getSharedPreferences("home", MODE_PRIVATE).getBoolean("smooth_volume", false) ||
             Remap.all(this).isNotEmpty() || Remap.learn != null
         val flag = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
-        serviceInfo = serviceInfo.apply { flags = if (filter) flags or flag else flags and flag.inv() }
+        serviceInfo = info.apply { flags = if (filter) flags or flag else flags and flag.inv() }
     }
 
     /**
@@ -84,6 +86,7 @@ class HomeOverride : AccessibilityService() {
         if (e.keyCode != KeyEvent.KEYCODE_HOME) return remap(e)
         // Decided on release, by how long it was held: this TV's remote doesn't reliably send key repeats.
         if (e.action == KeyEvent.ACTION_UP && !e.isCanceled) {
+            allowGoogleTv = false
             if (e.eventTime - e.downTime < LONG_PRESS_MS) goHome() else performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
         }
         return true
@@ -117,8 +120,13 @@ class HomeOverride : AccessibilityService() {
         if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = e.packageName?.toString().orEmpty()
             if (pkg == GOOGLE_TV || pkg == SETUP_WRAITH) {
+                if (allowGoogleTv) return
                 val cls = e.className?.toString().orEmpty()
-                if (!cls.contains("dashboard", ignoreCase = true) && !cls.contains("SidePanel", ignoreCase = true)) {
+                if (cls.contains("dashboard", ignoreCase = true) || cls.contains("SidePanel", ignoreCase = true)) return
+                val isHomeScreen = cls.contains(".home.HomeActivity") ||
+                                   cls.contains(".home.VanillaModeHomeActivity") ||
+                                   cls.endsWith(".HomeActivity")
+                if (isHomeScreen) {
                     goHome()
                 }
             }
@@ -138,6 +146,7 @@ class HomeOverride : AccessibilityService() {
         /** The bound service, so Plume's switch can turn it off without any permission. */
         var running: HomeOverride? = null
             private set
+        @Volatile var allowGoogleTv = false
         private const val GOOGLE_TV = "com.google.android.apps.tv.launcherx"
         private const val SETUP_WRAITH = "com.google.android.tungsten.setupwraith"
         private const val LONG_PRESS_MS = 500L

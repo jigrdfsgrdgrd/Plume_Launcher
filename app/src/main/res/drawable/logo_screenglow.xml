@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Ambient Glow Outer Arc -->
+    <path
+        android:fillColor="#FFB86BFF"
+        android:pathData="M12,2C6.48,2 2,6.48 2,12h2c0,-4.41 3.59,-8 8,-8s8,3.59 8,8h2c0,-5.52 -4.48,-10 -10,-10z" />
+    <!-- Ambient Glow Inner Arc -->
+    <path
+        android:fillColor="#FF00E5FF"
+        android:pathData="M12,5c-3.87,0 -7,3.13 -7,7h1.5c0,-3.04 2.46,-5.5 5.5,-5.5s5.5,2.46 5.5,5.5H19c0,-3.87 -3.13,-7 -7,-7z" />
+    <!-- Apple Studio Display Frame in Crisp White -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5.5,8h13c0.55,0 1,0.45 1,1v7.5c0,0.55 -0.45,1 -1,1h-13c-0.55,0 -1,-0.45 -1,-1V9c0,-0.55 0.45,-1 1,-1z" />
+    <!-- Inner Dark Screen -->
+    <path
+        android:fillColor="#FF180E29"
+        android:pathData="M6.5,9.5h11v5.2H6.5z" />
+    <!-- Stand -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.8,17.5h2.4v1.5h-2.4zM8.5,19h7v1h-7z" />
+</vector>

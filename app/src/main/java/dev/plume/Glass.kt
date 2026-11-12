@@ -152,6 +152,15 @@ internal class GlassLayer(context: Context) : View(context) {
         for (t in tiles) {
             val v = t.view.get() ?: continue
             if (!v.isShown || !v.getGlobalVisibleRect(visible)) continue
+            var a = v.alpha
+            var p = v.parent
+            while (p is View) {
+                a *= p.alpha
+                if (p.id == R.id.content || p.id == R.id.root) break
+                p = p.parent
+            }
+            if (a <= 0.01f) continue
+            paint.alpha = (a * 255f).toInt().coerceIn(0, 255)
             v.getLocationInWindow(at)
             // Where the tile is drawn, lift included; what a scroll view cuts off of it stays cut off.
             rect.set(at[0] - ox.toFloat(), at[1] - oy.toFloat(), at[0] - ox + v.width * v.scaleX, at[1] - oy + v.height * v.scaleY)
@@ -160,6 +169,7 @@ internal class GlassLayer(context: Context) : View(context) {
             c.drawRoundRect(rect, t.radius * v.scaleX, t.radius * v.scaleY, paint)
             c.restore()
         }
+        paint.alpha = 255
         if (SystemClock.uptimeMillis() < until) postInvalidateOnAnimation()
     }
 }
