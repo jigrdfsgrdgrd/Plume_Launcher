@@ -751,7 +751,7 @@ class MainActivity : Activity() {
 
         wifi = findViewById(R.id.wifi)
 
-        findViewById<View>(R.id.sourcesButton).visibility = if (sources.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.sourcesButton).visibility = View.GONE
 
         applyTheme()
 
@@ -820,6 +820,9 @@ class MainActivity : Activity() {
             }
 
             setOnClickListener { action() }
+
+            isFocusable = false
+            isClickable = false
 
         }
 
@@ -1734,7 +1737,7 @@ class MainActivity : Activity() {
 
         findViewById<View>(R.id.root).setBackgroundColor(ground)
 
-        allApps.setBackgroundColor(if (dark) 0xF207090E.toInt() else 0xF0F3F5F7.toInt())
+        allApps.setBackgroundColor(if (dark) 0xB80A0D14.toInt() else 0xD8F3F5F7.toInt())
 
         for (id in intArrayOf(R.id.clock, R.id.date, R.id.appsTitle, R.id.watchTitle, R.id.allAppsTitle, R.id.rowLabel, R.id.weather)) {
 
@@ -4987,11 +4990,13 @@ class MainActivity : Activity() {
 
         for (id in listOf(R.id.settingsCrumb, R.id.settingsHelp)) findViewById<TextView>(id).apply { setTextColor(fg); secondary(0.6f) }
 
-        settingsScrim.background = ColorDrawable(0x70000000)
-
         pages.clear()
 
         settingsScrim.visibility = View.VISIBLE
+
+        findViewById<View>(R.id.content)?.animate()?.alpha(0.25f)?.setDuration(200)?.start()
+
+        appScroll.animate()?.translationY(dp(44).toFloat())?.alpha(0.12f)?.setDuration(200)?.start()
 
         homeFocusable(false)
 
@@ -5001,18 +5006,18 @@ class MainActivity : Activity() {
 
     private fun showPanelGlass() {
 
-        val panel = findViewById<GlassBox>(R.id.settingsPanel)
-        panel.setWillNotDraw(true)
-        val round = dp(24).toFloat()
-        val bg = GradientDrawable().apply {
+        val panel = findViewById<LinearLayout>(R.id.settingsPanel)
+        val bg = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            if (!dark) intArrayOf(0xD8F5F7FA.toInt(), 0xE6E8ECF2.toInt())
+            else intArrayOf(0x88383C46.toInt(), 0x98181A20.toInt())
+        ).apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadii = floatArrayOf(round, round, 0f, 0f, 0f, 0f, round, round)
-            setColor(if (!dark) 0xF2F5F7FA.toInt() else 0xEE16181F.toInt())
-            setStroke(dp(1), if (!dark) 0x22000000 else 0x2EFFFFFF)
+            cornerRadius = dp(26).toFloat()
+            setStroke(dp(1), if (!dark) 0x33000000 else 0x45FFFFFF)
         }
         panel.background = bg
-        panel.clipToOutline = true
-        settingsScrim.background = ColorDrawable(0x70000000)
+        settingsScrim.background = ColorDrawable(0x44000000)
 
     }
 
@@ -5026,9 +5031,13 @@ class MainActivity : Activity() {
 
         settingsScrim.visibility = View.GONE
 
+        findViewById<View>(R.id.content)?.animate()?.alpha(1f)?.setDuration(200)?.start()
+
+        appScroll.animate()?.translationY(0f)?.alpha(1f)?.setDuration(200)?.start()
+
         homeFocusable(allApps.visibility != View.VISIBLE) // the PIN can open over All apps
 
-        (panelFrom?.takeIf { it.isAttachedToWindow } ?: findViewById(R.id.launcherSettings)).requestFocus()
+        (panelFrom?.takeIf { it.isAttachedToWindow && it.isShown } ?: appRow.getChildAt(0) ?: findViewById(R.id.ccCapsule))?.requestFocus()
 
         panelFrom = null
 
@@ -6095,7 +6104,11 @@ class MainActivity : Activity() {
 
     private fun settingsRow(title: String, value: String, step: ((Int) -> Unit)? = null, style: RowStyle? = null, action: () -> Unit): View {
 
-        val bg = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0, 0)).apply { cornerRadius = dp(8).toFloat() }
+        fun unfocusedPill() = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(if (dark) 0x1EFFFFFF else 0x12000000)
+            setStroke(1, if (dark) 0x22FFFFFF else 0x1A000000)
+        }
 
         return LinearLayout(this).apply {
 
@@ -6107,7 +6120,7 @@ class MainActivity : Activity() {
 
             setPadding(dp(14), 0, dp(14), 0)
 
-            background = bg
+            background = unfocusedPill()
 
             isFocusable = true
 
@@ -6172,13 +6185,13 @@ class MainActivity : Activity() {
                     subView?.setTextColor(0xFF444444.toInt())
                     shown?.setTextColor(Color.BLACK)
                 } else {
-                    background = null
+                    background = unfocusedPill()
                     elevation = 0f
                     animate().scaleX(1f).scaleY(1f).setDuration(140).setInterpolator(DECELERATE).start()
                     name.setTextColor(if (dark) Color.WHITE else 0xFF111214.toInt())
                     icon?.setColorFilter(if (dark) 0xCCFFFFFF.toInt() else 0xFF111214.toInt())
-                    subView?.setTextColor(0x88FFFFFF.toInt())
-                    shown?.setTextColor(0x88FFFFFF.toInt())
+                    subView?.setTextColor(if (dark) 0x88FFFFFF.toInt() else 0x88111214.toInt())
+                    shown?.setTextColor(if (dark) 0x88FFFFFF.toInt() else 0x88111214.toInt())
                 }
                 if (step != null) shown?.text = if (focused) "‹  $text  ›" else text
                 if (focused) {
@@ -6510,7 +6523,7 @@ class MainActivity : Activity() {
 
                 SOURCES = inputs
 
-                findViewById<View>(R.id.sourcesButton).visibility = if (inputs.isEmpty()) View.GONE else View.VISIBLE
+                findViewById<View>(R.id.sourcesButton).visibility = View.GONE
 
                 renderApps()
 
@@ -6868,7 +6881,7 @@ class MainActivity : Activity() {
 
         val tiles = sortedApps().filter { inRow(it.pkg, hidden) }.map { appTile(it, labeled = false) }.toMutableList()
 
-        if (!editing) {
+        if (tiles.isEmpty() || (!editing && prefs.getBoolean("show_dock_add", false))) {
             tiles.add(createAddTile(tileH))
         }
 
@@ -7241,12 +7254,17 @@ class MainActivity : Activity() {
                 }
             }
         }
-        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(c1, c2)).apply {
+        val (topColor, botColor) = if (tag == "__add_tile__") {
+            c1 to c2
+        } else {
+            ((c1 and 0x00FFFFFF) or 0xB8000000.toInt()) to ((c2 and 0x00FFFFFF) or 0xC8000000.toInt())
+        }
+        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(topColor, botColor)).apply {
             cornerRadius = radius
             if (focused) {
                 setStroke(dp(2), Color.WHITE)
             } else {
-                setStroke(1, 0x33FFFFFF.toInt())
+                setStroke(dp(1), 0x40FFFFFF)
             }
             setDither(true)
         }
@@ -7609,15 +7627,33 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             }
 
+            v.id == R.id.weatherContainer -> when (key) {
+
+                KeyEvent.KEYCODE_DPAD_DOWN -> pill ?: (if (appScroll.visibility == View.VISIBLE) apps else null) ?: cards ?: top
+
+                KeyEvent.KEYCODE_DPAD_RIGHT -> findViewById<View>(R.id.sleepTimerBadge)?.takeIf { it.visibility == View.VISIBLE } ?: findViewById<View>(R.id.ccCapsule) ?: v
+
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> v
+
+                else -> null
+
+            }
+
             v.parent === wifi.parent -> when (key) { // top bar
 
                 KeyEvent.KEYCODE_DPAD_DOWN -> pill ?: (if (appScroll.visibility == View.VISIBLE) apps else null) ?: cards ?: v
 
                 KeyEvent.KEYCODE_DPAD_UP -> v
 
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.presetButton) v else null
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (v.id == R.id.ccCapsule) {
+                    findViewById<View>(R.id.sleepTimerBadge)?.takeIf { it.visibility == View.VISIBLE }
+                        ?: findViewById<View>(R.id.weatherContainer)?.takeIf { it.visibility == View.VISIBLE }
+                        ?: v
+                } else {
+                    findViewById<View>(R.id.weatherContainer)?.takeIf { it.visibility == View.VISIBLE } ?: v
+                }
 
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (v.id == R.id.launcherSettings) v else null
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (v.id == R.id.ccCapsule) v else (findViewById<View>(R.id.ccCapsule) ?: v)
 
                 else -> null
 
@@ -7754,6 +7790,8 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
                 "Google Fotos Screensaver anpassen" to { openGooglePhotosAmbient() },
 
+                "Apps im Dock verwalten" to { pickRowApps() },
+
                 "Aus Dock entfernen" to {
 
                     prefs.edit().putStringSet("row_hidden", rowHiddenSet() + pkg).apply()
@@ -7781,6 +7819,8 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         holdMenu(v, listOfNotNull(
 
             getString(R.string.move) to { startEdit(grab = v, once = true) },
+
+            "Apps im Dock verwalten" to { pickRowApps() },
 
             getString(R.string.remove_from_row) to {
 
@@ -8205,13 +8245,13 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         ALL("Alle"),
 
-        STREAMING("\uD83C\uDFAC Streaming"),
+        STREAMING("Streaming"),
 
-        MUSIC("\uD83C\uDFB5 Musik"),
+        MUSIC("Musik"),
 
-        GAMES("\uD83C\uDFAE Spiele"),
+        GAMES("Spiele"),
 
-        TOOLS("\uD83D\uDEE0\uFE0F Tools")
+        TOOLS("Tools")
 
     }
 
@@ -8307,6 +8347,8 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             .start()
 
+        findViewById<View>(R.id.content)?.animate()?.alpha(0f)?.setDuration(200L)?.setInterpolator(DECELERATE)?.start()
+
         homeFocusable(false)
 
         allAppsGrid.getChildAt(0)?.requestFocus()
@@ -8319,89 +8361,154 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         row.removeAllViews()
 
+        fun applyPillState(target: TextView, targetCat: AppCategory, focused: Boolean, animateScale: Boolean = true) {
+            val isSelected = targetCat == allAppsCategory
+            target.typeface = Typeface.create("sans-serif-medium", if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+            when {
+                focused -> {
+                    target.background = GradientDrawable().apply {
+                        cornerRadius = dp(18).toFloat()
+                        setColor(Color.WHITE)
+                    }
+                    target.setTextColor(0xFF111214.toInt())
+                    target.elevation = dp(10).toFloat()
+                    if (animateScale) {
+                        target.animate().scaleX(1.06f).scaleY(1.06f).setDuration(140).setInterpolator(DECELERATE).start()
+                    } else {
+                        target.scaleX = 1.06f
+                        target.scaleY = 1.06f
+                    }
+                }
+                isSelected -> {
+                    target.background = GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(0x55FFFFFF, 0x38FFFFFF)
+                    ).apply {
+                        cornerRadius = dp(18).toFloat()
+                        setStroke(dp(1), 0xAAFFFFFF.toInt())
+                    }
+                    target.setTextColor(Color.WHITE)
+                    target.elevation = dp(2).toFloat()
+                    if (animateScale) {
+                        target.animate().scaleX(1f).scaleY(1f).setDuration(140).setInterpolator(DECELERATE).start()
+                    } else {
+                        target.scaleX = 1f
+                        target.scaleY = 1f
+                    }
+                }
+                else -> {
+                    target.background = GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(0x88383C46.toInt(), 0x96181A20.toInt())
+                    ).apply {
+                        cornerRadius = dp(18).toFloat()
+                        setStroke(dp(1), 0x45FFFFFF)
+                    }
+                    target.setTextColor(0xE0FFFFFF.toInt())
+                    target.elevation = 0f
+                    if (animateScale) {
+                        target.animate().scaleX(1f).scaleY(1f).setDuration(140).setInterpolator(DECELERATE).start()
+                    } else {
+                        target.scaleX = 1f
+                        target.scaleY = 1f
+                    }
+                }
+            }
+        }
+
         for (cat in AppCategory.values()) {
 
             val count = if (cat == AppCategory.ALL) allAppsCachedList.size else allAppsCachedList.count { getAppCategory(it) == cat }
 
             if (count == 0 && cat != AppCategory.ALL) continue
 
-            val isSelected = cat == allAppsCategory
-
             val pill = TextView(this).apply {
+
+                tag = cat
 
                 text = "${cat.title} ($count)"
 
                 textSize = 12f
 
-                typeface = Typeface.create("sans-serif-medium", if (isSelected) Typeface.BOLD else Typeface.NORMAL)
-
-                setPadding(dp(12), dp(6), dp(12), dp(6))
+                setPadding(dp(16), dp(8), dp(16), dp(8))
 
                 isFocusable = true
 
                 isClickable = true
 
-                val bg = GradientDrawable().apply {
+                applyPillState(this, cat, false, animateScale = false)
 
-                    cornerRadius = dp(14).toFloat()
+                setOnFocusChangeListener { v, focused ->
 
-                    if (isSelected) {
+                    if (focused && allAppsCategory != cat) {
 
-                        setColor(if (dark) 0xE0FFFFFF.toInt() else 0xFF111214.toInt())
+                        allAppsCategory = cat
 
-                        setTextColor(if (dark) 0xFF111214.toInt() else Color.WHITE)
+                        for (i in 0 until row.childCount) {
 
-                    } else {
+                            val sib = row.getChildAt(i) as? TextView ?: continue
 
-                        setColor(if (dark) 0x25FFFFFF else 0x15000000)
+                            val sibCat = sib.tag as? AppCategory ?: continue
 
-                        setStroke(dp(1), if (dark) 0x25FFFFFF else 0x25000000)
+                            if (sib !== v) applyPillState(sib, sibCat, false, animateScale = false)
 
-                        setTextColor(if (dark) 0xFFB0C2D8.toInt() else 0x99000000.toInt())
+                        }
 
-                    }
-
-                }
-
-                background = bg
-
-                setOnFocusChangeListener { _, focused ->
-
-                    if (focused) {
-
-                        animate().scaleX(1.08f).scaleY(1.08f).setDuration(140).start()
-
-                        bg.setStroke(dp(2), Color.WHITE)
-
-                    } else {
-
-                        animate().scaleX(1f).scaleY(1f).setDuration(140).start()
-
-                        if (!isSelected) bg.setStroke(dp(1), if (dark) 0x25FFFFFF else 0x25000000)
+                        renderAllAppsGrid(cat)
 
                     }
 
+                    applyPillState(v as TextView, cat, focused, animateScale = true)
+
                 }
 
-                setOnClickListener {
+                setOnClickListener { v ->
 
-                    allAppsCategory = cat
+                    if (allAppsCategory != cat) {
 
-                    renderAllAppsCategories()
+                        allAppsCategory = cat
 
-                    renderAllAppsGrid(cat)
+                        for (i in 0 until row.childCount) {
+
+                            val sib = row.getChildAt(i) as? TextView ?: continue
+
+                            val sibCat = sib.tag as? AppCategory ?: continue
+
+                            applyPillState(sib, sibCat, sib === v && sib.isFocused, animateScale = false)
+
+                        }
+
+                        renderAllAppsGrid(cat)
+
+                    }
 
                     allAppsGrid.getChildAt(0)?.requestFocus()
 
                 }
 
-                setOnKeyListener { _, keyCode, event ->
+                setOnKeyListener { v, keyCode, event ->
 
-                    if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
 
-                        allAppsGrid.getChildAt(0)?.requestFocus()
+                        when (keyCode) {
 
-                        true
+                            KeyEvent.KEYCODE_DPAD_DOWN -> {
+
+                                allAppsGrid.getChildAt(0)?.requestFocus()
+
+                                true
+
+                            }
+
+                            KeyEvent.KEYCODE_DPAD_UP -> true
+
+                            KeyEvent.KEYCODE_DPAD_LEFT -> row.indexOfChild(v) == 0
+
+                            KeyEvent.KEYCODE_DPAD_RIGHT -> row.indexOfChild(v) == row.childCount - 1
+
+                            else -> false
+
+                        }
 
                     } else false
 
@@ -8548,13 +8655,49 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             t.setOnKeyListener { _, keyCode, event ->
 
-                if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP && row == 0) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
 
-                    val catRow = findViewById<LinearLayout>(R.id.allAppsCategoryRow)
+                    when {
 
-                    catRow?.getChildAt(allAppsCategory.ordinal.coerceAtMost(catRow.childCount - 1))?.requestFocus()
+                        keyCode == KeyEvent.KEYCODE_DPAD_UP && row == 0 -> {
 
-                    true
+                            val catRow = findViewById<LinearLayout>(R.id.allAppsCategoryRow)
+
+                            var target: View? = null
+
+                            if (catRow != null) {
+
+                                for (i in 0 until catRow.childCount) {
+
+                                    val child = catRow.getChildAt(i)
+
+                                    if (child.tag == allAppsCategory) {
+
+                                        target = child
+
+                                        break
+
+                                    }
+
+                                }
+
+                                if (target == null) target = catRow.getChildAt(0)
+
+                            }
+
+                            target?.requestFocus()
+
+                            true
+
+                        }
+
+                        keyCode == KeyEvent.KEYCODE_DPAD_LEFT && col == 0 -> true
+
+                        keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && (col == cols - 1 || idx == filtered.size - 1) -> true
+
+                        else -> false
+
+                    }
 
                 } else false
 
@@ -8614,11 +8757,13 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             .start()
 
+        findViewById<View>(R.id.content)?.animate()?.alpha(1f)?.setDuration(200L)?.setInterpolator(DECELERATE)?.start()
+
         homeFocusable(true)
 
         renderApps()
 
-        findViewById<View>(R.id.allAppsButton).requestFocus()
+        (appRow.getChildAt(0) ?: findViewById(R.id.ccCapsule))?.requestFocus()
 
     }
 
@@ -9103,14 +9248,14 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         }
 
         val cards = listOf(
-            CcTile("WLAN", wifiSub, R.drawable.ic_wifi, accentTint = 0xFF0A84FF.toInt()) {
+            CcTile("WLAN", wifiSub, R.drawable.ic_wifi, accentTint = null) {
                 try {
                     startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: Exception) {
                     startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
             },
-            CcTile("Bluetooth", btSub, R.drawable.ic_bluetooth, accentTint = 0xFF0A84FF.toInt()) {
+            CcTile("Bluetooth", btSub, R.drawable.ic_bluetooth, accentTint = null) {
                 try {
                     startActivity(Intent("com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: Exception) {

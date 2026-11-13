@@ -23,6 +23,15 @@ Stock Android TV launchers are full of ads, sponsored carousels, and visual clut
   <img src="screenshots/control_center.png" alt="Apple TV Floating Control Center" width="95%">
 </p>
 
+### Categorized App Library
+* Fullscreen translucent app drawer with category filter pills (**Alle**, **Streaming**, **Musik**, **Spiele**, **Tools**).
+* Live category filtering as you move across filter pills, with clean 6-column D-Pad grid navigation.
+* Dock row stays uncluttered without a permanent `+` tile—long-press any dock icon to manage pinned apps.
+
+<p align="center">
+  <img src="screenshots/all_apps.png" alt="Categorized All-Apps Grid" width="95%">
+</p>
+
 ### Apple TV 4K Aerials Library (114 Videos)
 * Complete catalog of all official Apple TV Aerials sourced in full 4K SDR/HDR directly from Apple's CDN.
 * Organized by category:
@@ -40,7 +49,7 @@ Stock Android TV launchers are full of ads, sponsored carousels, and visual clut
 
 ### tvOS Screensaver & Smooth Glass Menus
 * When idle (or triggered via back button), the launcher smoothly transitions into a fullscreen video screensaver with clean location titles in the bottom-left corner.
-* The settings sheet uses translucent graphite glass with rounded 24dp corners and subtle edge rims, keeping video playback visible in the background without glitchy black cutouts.
+* The floating settings drawer uses translucent smoky glass with rounded 26dp corners and subtle edge rims, keeping video playback visible in the background while gently fading the dock.
 
 <p align="center">
   <img src="screenshots/settings_drawer.png" alt="Side Drawer" width="70%">
