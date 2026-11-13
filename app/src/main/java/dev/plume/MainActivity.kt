@@ -3509,8 +3509,40 @@ class MainActivity : Activity() {
         return f.exists() && f.length() > 30_000_000L
     }
 
+    private fun availableStorageBytes(dir: File): Long = try {
+        val st = android.os.StatFs(dir.absolutePath)
+        st.availableBlocksLong * st.blockSizeLong
+    } catch (_: Exception) {
+        Long.MAX_VALUE
+    }
+
+    private fun pruneOldAerialsIfLowSpace(destDir: File, keepChoice: String, targetFreeBytes: Long = 750_000_000L) {
+        val keepFile = AERIAL_4K_CATALOG.firstOrNull { it.choice == keepChoice }?.fileName4K
+        val curFile = AERIAL_4K_CATALOG.firstOrNull { it.choice == currentWallpaper(true) }?.fileName4K
+        val candidates = (destDir.listFiles { f -> f.isFile && f.name.endsWith(".mov") } ?: emptyArray())
+            .filter { it.name != keepFile && it.name != curFile }
+            .sortedBy { it.lastModified() }
+        for (f in candidates) {
+            if (availableStorageBytes(destDir) >= targetFreeBytes) break
+            f.delete()
+        }
+    }
+
     private fun ensureCore4KAerialsDownloaded() {
-        for (item in AERIAL_4K_CATALOG.take(3)) {
+        val dir = aerials4KDir()
+        val free = availableStorageBytes(dir)
+        val targets = when {
+            free >= 2_500_000_000L -> AERIAL_4K_CATALOG.take(3)
+            free >= 450_000_000L -> {
+                val cur = currentWallpaper(true)
+                listOfNotNull(
+                    AERIAL_4K_CATALOG.firstOrNull { it.choice == cur }
+                        ?: AERIAL_4K_CATALOG.firstOrNull { it.choice == "video:aerial_china.mov" }
+                )
+            }
+            else -> emptyList()
+        }
+        for (item in targets) {
             if (!isAerial4KReady(item.choice)) {
                 downloadAerial4K(item, userTriggered = false)
             }
@@ -3540,6 +3572,7 @@ class MainActivity : Activity() {
 
         aerialDownloadExecutor.execute {
             val destDir = aerials4KDir()
+            pruneOldAerialsIfLowSpace(destDir, item.choice)
             val partFile = File(destDir, "${item.fileName4K}.part")
             val finalFile = File(destDir, item.fileName4K)
             var ok = false
@@ -6467,11 +6500,17 @@ class MainActivity : Activity() {
 
                     val favOrder = listOf(
 
+                        "com.netflix.ninja",
+
                         "org.smarttube.stable",
 
                         "com.google.android.youtube.tv",
 
                         "com.amazon.amazonvideo.livingroom",
+
+                        "com.disney.disneyplus",
+
+                        "com.apple.atve.androidtv.appletv",
 
                         "com.spotify.tv.android",
 
@@ -7306,9 +7345,9 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         val img = ImageView(this).apply {
             setImageDrawable(icon.mutate())
             scaleType = ImageView.ScaleType.FIT_CENTER
-            if (!hasMultiColor) {
+            if (mono && !hasMultiColor) {
                 if (brandTint != null) setColorFilter(brandTint)
-                else if (mono) setColorFilter(tint ?: fg)
+                else setColorFilter(tint ?: fg)
             }
         }
 
