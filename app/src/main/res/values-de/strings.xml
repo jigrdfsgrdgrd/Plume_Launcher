@@ -1,0 +1,33 @@
+<resources>
+    <string name="profile_default_name">Profil</string>
+    <string name="section_profile">Profil &amp; Einrichtung</string>
+    <string name="profile_name">Profilname</string>
+    <string name="profile_not_set">Nicht festgelegt</string>
+    <string name="profile_name_hint">Namen eingeben (z. B. Alex)</string>
+    <string name="profile_clear">Namen entfernen</string>
+    <string name="cc_quick_tile">Kontrollzentrum-Kachel</string>
+    <string name="rerun_setup">Einrichtung erneut starten</string>
+    <string name="help_profile">Lege dein Profil-Kürzel neben der Uhr fest, wähle deinen HDMI-Schnellzugriff im Kontrollzentrum oder starte die Einrichtung neu.</string>
+    <string name="help_profile_name">Wird als Initiale im Profil-Button oben rechts angezeigt.</string>
+    <string name="help_cc_quick_tile">Wähle, was die dritte Kachel im Kontrollzentrum öffnet – einen HDMI-Eingang oder Bildschirmschoner.</string>
+    <string name="help_rerun_setup">Startet die Ersteinrichtung für Name und HDMI-Schnellzugriff erneut.</string>
+    <string name="setup_welcome_title">Willkommen bei Plume</string>
+    <string name="setup_welcome_body">Gib deinen Namen für das Profil-Symbol oben rechts ein oder überspringe diesen Schritt.</string>
+    <string name="setup_continue">Weiter</string>
+    <string name="setup_skip">Überspringen</string>
+    <string name="setup_save">Speichern</string>
+    <string name="setup_quick_title">Kontrollzentrum-Schnellzugriff</string>
+    <string name="setup_quick_body">Wähle, welcher HDMI-Eingang oder welche Aktion über das Kontrollzentrum direkt geöffnet werden soll.</string>
+    <string name="setup_all_inputs">Alle HDMI-Eingänge anzeigen</string>
+    <string name="setup_all_inputs_sub">Öffnet die Eingangsauswahl</string>
+    <string name="setup_aerial_mode">Aerial Bildschirmschoner</string>
+    <string name="setup_aerial_sub">Startet den 4K-Bildschirmschoner</string>
+    <string name="setup_label_title">Kachel-Beschriftung</string>
+    <string name="setup_label_body">Gib %1$s optional einen kurzen Namen für das Kontrollzentrum (z. B. PC, Konsole, Apple TV).</string>
+    <string name="setup_label_hint">Eigener Name (optional)</string>
+    <string name="setup_label_original">„%1$s“ behalten</string>
+    <string name="setup_done_toast">Einrichtung gespeichert</string>
+    <string name="cc_aerials_title">Bildschoner</string>
+    <string name="cc_aerials_sub">4K Aerials</string>
+    <string name="cc_input_sub">HDMI-Eingang</string>
+</resources>

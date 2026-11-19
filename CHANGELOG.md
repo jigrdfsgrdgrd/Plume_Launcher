@@ -34,6 +34,13 @@ Put changes that are not released under `## Unreleased`. Rename that heading to 
 - **New order in Plume settings.** The sections follow the home screen from top to bottom: **Wallpaper & theme**, **Clock & weather**, **Apps row** and **Shows row**. Then come **Screensaver**, **Remote & Home button**, **Lock layout** and **Updates**. Some settings have shorter names. Your settings do not change. If Home does not open Plume yet, a **Finish setup** card shows at the top.
 - Plume shows in the app list on Xiaomi TVs. It also shows in other launchers that show only phone apps.
 
+## 1.6
+
+- **First-run setup.** Plume asks for your profile name and your preferred Control Center shortcut on first launch. You can change both anytime in **Plume settings → Profile & Setup**.
+- **Control Center storage manager.** Replaces the Audio tile with live free storage space and direct management to delete downloaded 4K Aerials or custom wallpapers.
+- **Custom Control Center shortcut.** Pick any HDMI input with an optional custom name, open the full HDMI list, or launch Aerial screensavers directly from Control Center.
+- **No device hardcodes.** Removed pre-configured profile initials and HDMI port names so Plume adapts cleanly to any Smart TV or streaming box out of the box.
+
 ## 1.5
 
 ### New

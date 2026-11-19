@@ -368,6 +368,10 @@ internal fun hdmiIcon(name: String, named: Boolean): String {
 
         "apple tv" in n || "appletv" in n -> "appletv"
 
+        "pc" in n || "computer" in n || "desktop" in n -> "pc"
+
+        "receiver" in n || "avr" in n -> "receiver"
+
         SET_TOP_WORDS.any { it in n } -> "settop"
 
         named -> "playback"
@@ -888,13 +892,13 @@ class MainActivity : Activity() {
 
             ui.post { openLauncherSettings(R.string.theme) }
 
-        } else if (!homeServiceOn() && !prefs.getBoolean("setup_shown", false)) {
+        } else if (!prefs.getBoolean("onboarding_v1", false)) {
 
-            // Fresh install: walk through making Home land on Plume, the one step that has to happen by hand.
+            // First-run onboarding: let any user personalize name, HDMI quick-action, and Home button.
 
-            prefs.edit().putBoolean("setup_shown", true).apply()
+            prefs.edit().putBoolean("onboarding_v1", true).putBoolean("setup_shown", true).apply()
 
-            ui.post { startHomeSetup() }
+            ui.post { startOnboardingWizard() }
 
         } else if (notesUnseen()) {
 
@@ -1585,6 +1589,185 @@ class MainActivity : Activity() {
 
         card.getChildAt(card.childCount - buttons.size).requestFocus()
 
+    }
+
+    private fun hideKeyboard(view: View) {
+        getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
+    private fun saveProfileName(raw: String) {
+        val cleaned = raw.trim().take(24)
+        prefs.edit().apply {
+            if (cleaned.isEmpty()) remove("user_name") else putString("user_name", cleaned)
+        }.apply()
+        updateHomeClockVisibility()
+    }
+
+    private fun startOnboardingWizard(fromSettings: Boolean = false) {
+        val current = prefs.getString("user_name", "")?.trim().orEmpty()
+        lateinit var field: EditText
+        field = textField(current, getString(R.string.profile_name_hint), InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) { entered ->
+            hideKeyboard(field)
+            saveProfileName(entered)
+            if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
+            else finishOnboarding(fromSettings)
+        }
+        val box = (field.parent as LinearLayout).apply { setPadding(0, dp(14), 0, dp(4)) }
+        homePopup(
+            0,
+            getString(R.string.setup_welcome_title),
+            getString(R.string.setup_welcome_body),
+            box,
+            getString(R.string.setup_continue) to {
+                hideKeyboard(field)
+                saveProfileName(field.text.toString())
+                if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
+                else finishOnboarding(fromSettings)
+            },
+            getString(R.string.setup_skip) to {
+                hideKeyboard(field)
+                if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
+                else finishOnboarding(fromSettings)
+            },
+        )
+    }
+
+    private fun pickUserName() {
+        val current = prefs.getString("user_name", "")?.trim().orEmpty()
+        lateinit var field: EditText
+        field = textField(current, getString(R.string.profile_name_hint), InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) { entered ->
+            hideKeyboard(field)
+            saveProfileName(entered)
+            setupDialog?.dismiss()
+            if (settingsScrim.visibility == View.VISIBLE) renderSettings(R.string.profile_name)
+        }
+        val box = (field.parent as LinearLayout).apply { setPadding(0, dp(14), 0, dp(4)) }
+        val buttons = mutableListOf(
+            getString(R.string.setup_save) to {
+                hideKeyboard(field)
+                saveProfileName(field.text.toString())
+                setupDialog?.dismiss()
+                if (settingsScrim.visibility == View.VISIBLE) renderSettings(R.string.profile_name)
+            }
+        )
+        if (current.isNotEmpty()) {
+            buttons += getString(R.string.profile_clear) to {
+                hideKeyboard(field)
+                saveProfileName("")
+                setupDialog?.dismiss()
+                if (settingsScrim.visibility == View.VISIBLE) renderSettings(R.string.profile_name)
+            }
+        }
+        buttons += getString(android.R.string.cancel) to {
+            hideKeyboard(field)
+            setupDialog?.dismiss()
+        }
+        homePopup(
+            0,
+            getString(R.string.profile_name),
+            getString(R.string.help_profile_name),
+            box,
+            *buttons.toTypedArray(),
+        )
+    }
+
+    private fun pickQuickCcTile(fromOnboarding: Boolean = false, fromSettings: Boolean = false) {
+        val mode = prefs.getString("cc_quick_mode", "auto")
+        val selectedPkg = prefs.getString("cc_quick_pkg", null)
+        val entries = sources.map { src ->
+            val checked = mode == "input" && selectedPkg == src.pkg
+            val value = when {
+                checked -> CHOSEN
+                src.offline -> getString(R.string.no_signal)
+                else -> ""
+            }
+            Triple(src.label, value) {
+                prefs.edit().putString("cc_quick_mode", "input").putString("cc_quick_pkg", src.pkg).apply()
+                if (fromOnboarding) {
+                    pickQuickTileLabel(src, fromOnboarding = true, fromSettings = fromSettings)
+                } else {
+                    pickQuickTileLabel(src, fromOnboarding = false, fromSettings = fromSettings)
+                }
+            }
+        } + listOf(
+            Triple(getString(R.string.setup_all_inputs), if (mode == "sources" || mode == "auto") CHOSEN else getString(R.string.setup_all_inputs_sub)) {
+                prefs.edit().putString("cc_quick_mode", "sources").remove("cc_quick_pkg").remove("cc_quick_label").apply()
+                if (fromOnboarding) finishOnboarding(fromSettings) else renderSettings(R.string.cc_quick_tile)
+            },
+            Triple(getString(R.string.setup_aerial_mode), if (mode == "aerial") CHOSEN else getString(R.string.setup_aerial_sub)) {
+                prefs.edit().putString("cc_quick_mode", "aerial").remove("cc_quick_pkg").remove("cc_quick_label").apply()
+                if (fromOnboarding) finishOnboarding(fromSettings) else renderSettings(R.string.cc_quick_tile)
+            }
+        )
+
+        if (!fromOnboarding) {
+            val rows = entries.map { (title, sub, action) -> page(title, sub, action) }
+            return showPage(getString(R.string.cc_quick_tile), rows) { renderSettings(R.string.cc_quick_tile) }
+        }
+
+        val listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, 0)
+            for ((idx, entry) in entries.withIndex()) {
+                addView(
+                    settingsRow(entry.first, entry.second) { entry.third() },
+                    LinearLayout.LayoutParams(MATCH_PARENT, dp(44)).apply { if (idx > 0) topMargin = dp(4) }
+                )
+            }
+        }
+        val scroll = android.widget.ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(230))
+            addView(listBox)
+        }
+        homePopup(
+            0,
+            getString(R.string.setup_quick_title),
+            getString(R.string.setup_quick_body),
+            scroll,
+            getString(R.string.setup_skip) to { finishOnboarding(fromSettings) },
+        )
+        (listBox.getChildAt(0) ?: return).requestFocus()
+    }
+
+    private fun pickQuickTileLabel(source: App, fromOnboarding: Boolean, fromSettings: Boolean) {
+        val current = prefs.getString("cc_quick_label", "")?.trim().orEmpty()
+        lateinit var field: EditText
+        val doneAction: (String) -> Unit = { custom ->
+            hideKeyboard(field)
+            val cleaned = custom.trim().take(14)
+            prefs.edit().apply {
+                if (cleaned.isEmpty()) remove("cc_quick_label") else putString("cc_quick_label", cleaned)
+            }.apply()
+            if (fromOnboarding) {
+                finishOnboarding(fromSettings)
+            } else {
+                setupDialog?.dismiss()
+                if (settingsScrim.visibility == View.VISIBLE) renderSettings(R.string.cc_quick_tile)
+            }
+        }
+        field = textField(current, getString(R.string.setup_label_hint), InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) {
+            doneAction(it)
+        }
+        val box = (field.parent as LinearLayout).apply { setPadding(0, dp(14), 0, dp(4)) }
+        homePopup(
+            0,
+            getString(R.string.setup_label_title),
+            getString(R.string.setup_label_body, source.label),
+            box,
+            getString(R.string.setup_save) to { doneAction(field.text.toString()) },
+            getString(R.string.setup_label_original, source.label) to { doneAction("") },
+        )
+    }
+
+    private fun finishOnboarding(fromSettings: Boolean) {
+        setupDialog?.dismiss()
+        updateHomeClockVisibility()
+        if (!fromSettings && !isDefaultHome() && !homeServiceOn() && !prefs.getBoolean("home_off", false)) {
+            startHomeSetup()
+        } else {
+            toast(getString(R.string.setup_done_toast))
+        }
     }
 
     /** Debug builds: every popup in turn, with buttons that only move on, to check the look on a TV. */
@@ -2944,9 +3127,8 @@ class MainActivity : Activity() {
         val topCl = findViewById<TextView>(R.id.topClock)
         val ccCap = findViewById<View>(R.id.ccCapsule)
         val topAv = findViewById<TextView>(R.id.topAvatar)
-        val savedName = prefs.getString("user_name", "Julius") ?: "Julius"
-        val userName = if (savedName == "Henry") "Julius".also { prefs.edit().putString("user_name", "Julius").apply() } else savedName
-        topAv?.text = userName.take(1).uppercase()
+        val userName = prefs.getString("user_name", "")?.trim().orEmpty()
+        topAv?.text = if (userName.isNotEmpty()) userName.take(1).uppercase() else "★"
         headerClock?.visibility = View.GONE
         topCl?.visibility = View.VISIBLE
         if (ccCap?.isFocused != true) {
@@ -3514,6 +3696,47 @@ class MainActivity : Activity() {
         st.availableBlocksLong * st.blockSizeLong
     } catch (_: Exception) {
         Long.MAX_VALUE
+    }
+
+    private fun formatStorageSize(bytes: Long): String {
+        val safe = bytes.coerceAtLeast(0L)
+        return if (safe >= 1_000_000_000L) {
+            String.format(java.util.Locale.GERMAN, "%.1f GB", safe / 1_000_000_000.0)
+        } else {
+            "${(safe / 1_000_000L).coerceAtLeast(1L)} MB"
+        }
+    }
+
+    private fun getDownloadedAerialsBytes(): Long {
+        val dir = aerials4KDir()
+        return (dir.listFiles { f -> f.isFile && (f.name.endsWith(".mov") || f.name.endsWith(".part")) } ?: emptyArray())
+            .sumOf { it.length() }
+    }
+
+    private fun listCustomWallpaperFiles(): List<File> =
+        wallpaperDir()?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp") }
+            ?.sortedBy { it.name }
+            .orEmpty()
+
+    private fun deleteAerial4K(item: Aerial4KItem) {
+        val dir = aerials4KDir()
+        val file = File(dir, item.fileName4K)
+        val part = File(dir, "${item.fileName4K}.part")
+        activeDownloads4K.remove(item.choice)
+        downloadProgress4K.remove(item.choice)
+        val wasActive = currentWallpaper(true) == item.choice
+        if (wasActive) {
+            stopVideoWallpaper()
+        }
+        try { if (file.exists()) file.delete() } catch (_: Exception) {}
+        try { if (part.exists()) part.delete() } catch (_: Exception) {}
+        if (wasActive) {
+            prefs.edit().putString("theme", "dark").putString("wp_dark", "auto:apple").apply()
+            setWallpaper(true, "auto:apple")
+            applyClockPreset("auto:apple")
+            updateNowPlayingPill(MediaBridge.currentTrack)
+            updateWallpaperDimOverlay()
+        }
     }
 
     private fun pruneOldAerialsIfLowSpace(destDir: File, keepChoice: String, targetFreeBytes: Long = 750_000_000L) {
@@ -4327,6 +4550,21 @@ class MainActivity : Activity() {
             area = AREA_ALL
         )
 
+        val usedBytes = getDownloadedAerialsBytes() + listCustomWallpaperFiles().sumOf { it.length() }
+        val totalSavedCount = readyCount + listCustomWallpaperFiles().size
+        rows += page(
+            "Speicher & Downloads",
+            if (totalSavedCount > 0) "${formatStorageSize(usedBytes)} ›" else "${formatStorageSize(availableStorageBytes(aerials4KDir()))} frei ›"
+        ) {
+            openStorageAndWallpapersManager(fromSettings) { openWallpaperStudio(fromSettings, 3) }
+        }
+        stepsList += null
+        stylesList += RowStyle(
+            icon = R.drawable.ic_memory,
+            sub = if (totalSavedCount > 0) "$totalSavedCount heruntergeladene Hintergründe verwalten oder löschen" else "Gerätespeicher & heruntergeladene Hintergründe",
+            area = AREA_ALL
+        )
+
         // Ready and Featured Apple 4K Aerials
         val featured = (AERIAL_4K_CATALOG.filter { isAerial4KReady(it.choice) } + AERIAL_4K_CATALOG.take(6)).distinctBy { it.choice }
         featured.forEach { item ->
@@ -4337,28 +4575,48 @@ class MainActivity : Activity() {
             val loading4K = item.choice in activeDownloads4K
             val pct = downloadProgress4K[item.choice] ?: 0
             val subText = when {
-                isPicked -> "Aktiv · 4K UHD"
-                ready4K -> "✓ Bereit · 4K UHD"
+                isPicked -> "Aktiv · 4K UHD (Verwalten/Löschen)"
+                ready4K -> "✓ Bereit · 4K UHD (Verwalten/Löschen)"
                 loading4K -> "4K lädt… ${pct}%"
                 resolveAerialVideoFile(item.choice) != null -> "4K lädt · ${item.durationLabel}"
                 else -> "4K UHD laden (${item.location})"
             }
             rows += page(dispTitle, subText) {
-                if (ready4K || resolveAerialVideoFile(item.choice) != null) {
+                if (ready4K) {
+                    promptAerialItemAction(item) { openWallpaperStudio(fromSettings, myIdx) }
+                } else if (resolveAerialVideoFile(item.choice) != null) {
                     prefs.edit().putString("theme", "dark").putString("wp_dark", item.choice).apply()
                     setWallpaper(true, item.choice)
                     applyClockPreset(item.choice)
                     updateNowPlayingPill(MediaBridge.currentTrack)
                     updateWallpaperDimOverlay()
-                    if (!ready4K) downloadAerial4K(item, userTriggered = false)
+                    downloadAerial4K(item, userTriggered = false)
+                    openWallpaperStudio(fromSettings, myIdx)
                 } else {
                     downloadAerial4K(item, userTriggered = true)
+                    openWallpaperStudio(fromSettings, myIdx)
                 }
-                openWallpaperStudio(fromSettings, myIdx)
             }
             stepsList += null
             stylesList += RowStyle(
                 thumb = item.choice to true,
+                area = AREA_ALL
+            )
+        }
+
+        // Custom uploaded wallpapers
+        listCustomWallpaperFiles().forEach { file ->
+            val myIdx = rows.size
+            val choice = "file:${file.name}"
+            val isPicked = current == choice
+            val dispTitle = if (isPicked) "\u2713  ${file.nameWithoutExtension}" else file.nameWithoutExtension
+            val fSize = formatStorageSize(file.length())
+            rows += page(dispTitle, if (isPicked) "Aktiv · $fSize" else "$fSize · Verwalten") {
+                promptCustomWallpaperAction(file) { openWallpaperStudio(fromSettings, myIdx) }
+            }
+            stepsList += null
+            stylesList += RowStyle(
+                thumb = choice to true,
                 area = AREA_ALL
             )
         }
@@ -4411,6 +4669,166 @@ class MainActivity : Activity() {
             } else {
                 closeLauncherSettings()
             }
+        }
+    }
+
+    private fun promptAerialItemAction(item: Aerial4KItem, onReturn: () -> Unit) {
+        val file = File(aerials4KDir(), item.fileName4K)
+        val sizeText = formatStorageSize(file.length())
+        val isPicked = currentWallpaper(true) == item.choice
+        val rows = listOf(
+            page(if (isPicked) "\u2713  Als Hintergrund aktiv" else "Als Hintergrund verwenden", "4K UHD") {
+                prefs.edit().putString("theme", "dark").putString("wp_dark", item.choice).apply()
+                setWallpaper(true, item.choice)
+                applyClockPreset(item.choice)
+                updateNowPlayingPill(MediaBridge.currentTrack)
+                updateWallpaperDimOverlay()
+                toast("${item.title} gewählt")
+                onReturn()
+            },
+            page("Hintergrund vom Gerät löschen", "$sizeText freigeben") {
+                deleteAerial4K(item)
+                toast("${item.title} gelöscht ($sizeText freigegeben)")
+                onReturn()
+            }
+        )
+        showPage(item.title, rows, crumb = "Hintergründe", back = onReturn)
+    }
+
+    private fun promptCustomWallpaperAction(file: File, onReturn: () -> Unit) {
+        val choice = "file:${file.name}"
+        val sizeText = formatStorageSize(file.length())
+        val isPicked = currentWallpaper(true) == choice
+        val rows = listOf(
+            page(if (isPicked) "\u2713  Als Hintergrund aktiv" else "Als Hintergrund verwenden", "Eigenes Bild") {
+                prefs.edit().putString("theme", "dark").putString("wp_dark", choice).apply()
+                setWallpaper(true, choice)
+                applyClockPreset(choice)
+                updateNowPlayingPill(MediaBridge.currentTrack)
+                updateWallpaperDimOverlay()
+                onReturn()
+            },
+            page("Bild vom Gerät löschen", "$sizeText freigeben") {
+                val wasActive = currentWallpaper(true) == choice || currentWallpaper(false) == choice
+                try { if (file.exists()) file.delete() } catch (_: Exception) {}
+                prefs.edit().apply {
+                    if (prefs.getString("wp_light", null) == choice) remove("wp_light")
+                    if (prefs.getString("wp_dark", null) == choice) remove("wp_dark")
+                }.apply()
+                if (wasActive) {
+                    loadWallpaper()
+                    applyClockPreset(currentWallpaper(true))
+                    updateNowPlayingPill(MediaBridge.currentTrack)
+                    updateWallpaperDimOverlay()
+                }
+                toast("${file.nameWithoutExtension} gelöscht ($sizeText freigegeben)")
+                onReturn()
+            }
+        )
+        showPage(file.nameWithoutExtension, rows, crumb = "Hintergründe", back = onReturn)
+    }
+
+    private fun openStorageAndWallpapersManager(fromSettings: Boolean = false, focusIdx: Int = 0, onBack: (() -> Unit)? = null) {
+        if (settingsScrim.visibility != View.VISIBLE) showPanel()
+
+        val dir = aerials4KDir()
+        val freeBytes = availableStorageBytes(dir)
+        val readyAerials = AERIAL_4K_CATALOG.filter { isAerial4KReady(it.choice) }
+        val customFiles = listCustomWallpaperFiles()
+        val usedBytes = getDownloadedAerialsBytes() + customFiles.sumOf { it.length() }
+
+        val rows = ArrayList<Triple<String, String, () -> Unit>>()
+        val stepsList = ArrayList<((Int) -> Unit)?>()
+        val stylesList = ArrayList<RowStyle?>()
+
+        rows += page("Freier Speicherplatz", "${formatStorageSize(freeBytes)} frei") {
+            try {
+                startActivity(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: Exception) {
+                    toast("Frei: ${formatStorageSize(freeBytes)}")
+                }
+            }
+        }
+        stepsList += null
+        stylesList += RowStyle(
+            icon = R.drawable.ic_memory,
+            sub = "Belegt durch Hintergründe: ${formatStorageSize(usedBytes)}",
+            area = AREA_ALL
+        )
+
+        val currentDark = currentWallpaper(true)
+        val inactiveAerials = readyAerials.filter { it.choice != currentDark }
+        if (inactiveAerials.isNotEmpty()) {
+            rows += page("Alle inaktiven 4K-Videos löschen", "${inactiveAerials.size} Videos") {
+                inactiveAerials.forEach { deleteAerial4K(it) }
+                toast("${inactiveAerials.size} Hintergründe gelöscht")
+                openStorageAndWallpapersManager(fromSettings, 0, onBack)
+            }
+            stepsList += null
+            stylesList += RowStyle(
+                icon = R.drawable.ic_screensaver,
+                sub = "Gibt sofort Speicherplatz frei (aktiver Hintergrund bleibt)",
+                area = AREA_ALL
+            )
+        }
+
+        readyAerials.forEach { item ->
+            val myIdx = rows.size
+            val fSize = formatStorageSize(File(dir, item.fileName4K).length())
+            val isPicked = currentDark == item.choice
+            val dispTitle = if (isPicked) "\u2713  ${item.title}" else item.title
+            rows += page(dispTitle, "$fSize · Löschen") {
+                promptAerialItemAction(item) { openStorageAndWallpapersManager(fromSettings, myIdx, onBack) }
+            }
+            stepsList += null
+            stylesList += RowStyle(
+                thumb = item.choice to true,
+                sub = if (isPicked) "Aktiv · Tippen zum Verwalten/Löschen" else "4K Video · Tippen zum Verwalten/Löschen",
+                area = AREA_ALL
+            )
+        }
+
+        customFiles.forEach { file ->
+            val myIdx = rows.size
+            val choice = "file:${file.name}"
+            val fSize = formatStorageSize(file.length())
+            val isPicked = currentDark == choice || currentWallpaper(false) == choice
+            val dispTitle = if (isPicked) "\u2713  ${file.nameWithoutExtension}" else file.nameWithoutExtension
+            rows += page(dispTitle, "$fSize · Löschen") {
+                promptCustomWallpaperAction(file) { openStorageAndWallpapersManager(fromSettings, myIdx, onBack) }
+            }
+            stepsList += null
+            stylesList += RowStyle(
+                thumb = choice to true,
+                sub = "Eigenes Bild · Tippen zum Verwalten/Löschen",
+                area = AREA_ALL
+            )
+        }
+
+        if (readyAerials.isEmpty() && customFiles.isEmpty()) {
+            rows += page("Keine heruntergeladenen Hintergründe", "Mediathek öffnen ›") {
+                openAerialLibrary(fromSettings)
+            }
+            stepsList += null
+            stylesList += RowStyle(
+                icon = R.drawable.ic_wallpaper,
+                sub = "Alle 4K-Speicherplätze sind frei",
+                area = AREA_ALL
+            )
+        }
+
+        showPage(
+            "Speicher",
+            rows,
+            focus = focusIdx.coerceIn(0, rows.size - 1),
+            steps = stepsList,
+            styles = stylesList,
+            crumb = if (fromSettings) "Hintergründe" else "Kontrollzentrum"
+        ) {
+            if (onBack != null) onBack() else closeLauncherSettings()
         }
     }
 
@@ -4491,21 +4909,15 @@ class MainActivity : Activity() {
 
             val dispTitle = if (isPicked) "\u2713  ${item.title}" else item.title
             val rightVal = when {
-                isPicked -> "Aktiv"
-                ready4K -> "4K UHD"
+                isPicked -> "Aktiv · 4K"
+                ready4K -> "Bereit · 4K"
                 loading4K -> "${pct}%"
                 else -> "Laden"
             }
 
             rows += page(dispTitle, rightVal) {
                 if (ready4K) {
-                    prefs.edit().putString("theme", "dark").putString("wp_dark", item.choice).apply()
-                    setWallpaper(true, item.choice)
-                    applyClockPreset(item.choice)
-                    updateNowPlayingPill(MediaBridge.currentTrack)
-                    updateWallpaperDimOverlay()
-                    toast("${item.title} gewählt")
-                    openAerialCategory(fromSettings, catCode, catTitle, myIdx)
+                    promptAerialItemAction(item) { openAerialCategory(fromSettings, catCode, catTitle, myIdx) }
                 } else if (loading4K) {
                     toast("${item.title} wird bereits geladen (${pct}%)…")
                 } else {
@@ -5421,6 +5833,15 @@ class MainActivity : Activity() {
 
             R.string.setup_home to Triple(getString(R.string.setup_home), "") { closeLauncherSettings(); startHomeSetup() },
 
+            R.string.profile_name to Triple(
+                getString(R.string.profile_name),
+                prefs.getString("user_name", "")?.trim().orEmpty().ifEmpty { getString(R.string.profile_not_set) }
+            ) { pickUserName() },
+
+            R.string.cc_quick_tile to Triple(getString(R.string.cc_quick_tile), resolveQuickCcTile().title) { pickQuickCcTile(fromSettings = true) },
+
+            R.string.rerun_setup to Triple(getString(R.string.rerun_setup), "") { closeLauncherSettings(); startOnboardingWizard(fromSettings = false) },
+
             R.string.home_button to Triple(getString(R.string.home_button), toggle(homeServiceOn())) { toggleHomeButton() },
 
             R.string.smooth_volume to Triple(getString(R.string.smooth_volume), toggle(prefs.getBoolean("smooth_volume", false))) {
@@ -5531,6 +5952,15 @@ class MainActivity : Activity() {
                     R.string.home_button,
                     R.string.section_keys,
                     R.string.lock_layout
+                )
+            ),
+            Triple(
+                R.string.section_profile,
+                prefs.getString("user_name", "")?.trim().orEmpty().ifEmpty { getString(R.string.profile_not_set) },
+                listOfNotNull(
+                    R.string.profile_name,
+                    R.string.cc_quick_tile.takeIf { sources.isNotEmpty() },
+                    R.string.rerun_setup
                 )
             )
         )
@@ -6526,7 +6956,7 @@ class MainActivity : Activity() {
 
                     val nonFavHidden = list.map { it.pkg }.filter { it !in favSet }.toSet()
 
-                    val activeInputs = inputs.filter { it.label == "Receiver" || it.label == "PC" }.ifEmpty { inputs.take(2) }
+                    val activeInputs = inputs.filter { !it.offline }.take(2)
 
                     val pinnedSet = activeInputs.map { it.pkg }.toSet()
 
@@ -6644,39 +7074,17 @@ class MainActivity : Activity() {
 
             }
 
-            val customLabel = when (portNum) {
+            val iconKey = hdmiIcon(label, named)
 
-                "1" -> "Receiver"
+            val baseIcon = getDrawable(HDMI_ICONS[iconKey]!!)!!
 
-                "2" -> "PC"
-
-                else -> label
-
-            }
-
-            val finalIcon = when (portNum) {
-
-                "1" -> getDrawable(R.drawable.ic_receiver)!!
-
-                "2" -> getDrawable(R.drawable.ic_pc)!!
-
-                else -> {
-
-                    val iconKey = hdmiIcon(label, named)
-
-                    val baseIcon = getDrawable(HDMI_ICONS[iconKey]!!)!!
-
-                    if (iconKey == "hdmi" && portNum.isNotEmpty()) numberedHdmiDrawable(baseIcon, portNum) else baseIcon
-
-                }
-
-            }
+            val finalIcon = if (iconKey == "hdmi" && portNum.isNotEmpty()) numberedHdmiDrawable(baseIcon, portNum) else baseIcon
 
             App(
 
                 HDMI + port,
 
-                customLabel,
+                label,
 
                 Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(port)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
 
@@ -9237,25 +9645,39 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         }
     }
 
-    private fun launchPcInput() {
-        closeControlCenter {
-            val pc = sources.firstOrNull {
-                it.pkg.contains("HW15") || it.label.equals("PC", ignoreCase = true) || it.label.contains("HDMI 1", ignoreCase = true)
-            } ?: sources.firstOrNull { it.pkg.startsWith(HDMI) }
+    private fun resolveQuickCcTile(): CcTile {
+        val mode = prefs.getString("cc_quick_mode", "auto")
+        if (sources.isEmpty() || mode == "aerial") {
+            return CcTile(
+                getString(R.string.cc_aerials_title),
+                getString(R.string.cc_aerials_sub),
+                R.drawable.ic_screensaver,
+                accentTint = null
+            ) {
+                closeControlCenter { enterAerialFullscreen() }
+            }
+        }
+        val selectedPkg = prefs.getString("cc_quick_pkg", null)
+        val target = if (mode == "input") {
+            sources.firstOrNull { it.pkg == selectedPkg } ?: sources.firstOrNull { !it.offline } ?: sources.firstOrNull()
+        } else null
 
-            if (pc != null) {
-                launch(pc)
+        return if (target != null) {
+            val customLabel = prefs.getString("cc_quick_label", "")?.trim().orEmpty()
+            val title = customLabel.ifEmpty { target.label }.take(14)
+            val sub = if (customLabel.isNotEmpty() && !customLabel.equals(target.label, ignoreCase = true)) {
+                target.label
             } else {
-                try {
-                    val uri = TvContract.buildChannelUriForPassthroughInput("com.tcl.tvinput/.TvPassThroughService/HW15")
-                    startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (_: Exception) {
-                    try {
-                        startActivity(Intent("com.android.tv.action.VIEW_INPUTS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (_: Exception) {
-                        toast("HDMI 1 / PC wird geöffnet...")
-                    }
-                }
+                getString(R.string.cc_input_sub)
+            }
+            val iconKey = hdmiIcon("$customLabel ${target.label}", named = true)
+            val iconRes = HDMI_ICONS[iconKey] ?: R.drawable.ic_sources
+            CcTile(title, sub, iconRes, accentTint = null) {
+                closeControlCenter { launch(target) }
+            }
+        } else {
+            CcTile(getString(R.string.sources), "${sources.size} HDMI", R.drawable.ic_sources, accentTint = null) {
+                closeControlCenter { showSources(findViewById(R.id.ccCapsule) ?: appRow) }
             }
         }
     }
@@ -9269,7 +9691,13 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         val wifiSub = getWifiStatusSubtitle()
         val btSub = getBluetoothStatusSubtitle()
-        val audioSub = if (isAudioMuted()) "Stumm" else "TV-Lautsprecher"
+        val freeBytes = availableStorageBytes(aerials4KDir())
+        val storageSub = "${formatStorageSize(freeBytes)} frei"
+        val storageTint = when {
+            freeBytes < 350_000_000L -> 0xFFFF453A.toInt()
+            freeBytes < 750_000_000L -> 0xFFFF9F0A.toInt()
+            else -> null
+        }
 
         val curWp = currentWallpaper(true)
         val wpSub = AERIAL_4K_CATALOG.firstOrNull { it.choice == curWp }?.title?.let {
@@ -9305,24 +9733,16 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                     }
                 }
             },
-            CcTile("PC", "HDMI 1", R.drawable.ic_pc, accentTint = null) {
-                launchPcInput()
-            },
+            resolveQuickCcTile(),
             CcTile("Hintergründe", wpSub, R.drawable.ic_wallpaper, accentTint = null) {
                 closeControlCenter {
                     openWallpaperStudio(fromSettings = false)
                 }
             },
-            CcTile("Audio", audioSub, R.drawable.ic_airplay_audio) {
-                try {
-                    startActivity(Intent("com.android.tv.settings.SOUND_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (_: Exception) {
-                    try {
-                        startActivity(Intent(Settings.ACTION_SOUND_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (_: Exception) {
-                        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
-                        renderControlCenterTiles("Audio")
+            CcTile("Speicher", storageSub, R.drawable.ic_memory, accentTint = storageTint) {
+                closeControlCenter {
+                    openStorageAndWallpapersManager(fromSettings = false) {
+                        closeLauncherSettings()
                     }
                 }
             },
@@ -9346,20 +9766,21 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         }
 
         if (bottomRow != null) {
-            val bottomActions = listOf<Triple<String, Int, () -> Unit>>(
+            val primaryBottomAction = if (sources.isNotEmpty()) {
                 Triple("btn_sources", R.drawable.ic_sources) {
                     closeControlCenter {
-                        if (sources.isNotEmpty()) {
-                            showSources(findViewById(R.id.ccCapsule) ?: appRow)
-                        } else {
-                            try {
-                                startActivity(Intent("com.android.tv.action.VIEW_INPUTS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            } catch (_: Exception) {
-                                toast("Keine externen HDMI-Eingänge aktiv")
-                            }
-                        }
+                        showSources(findViewById(R.id.ccCapsule) ?: appRow)
                     }
-                },
+                }
+            } else {
+                Triple("btn_screensaver", R.drawable.ic_screensaver) {
+                    closeControlCenter {
+                        enterAerialFullscreen()
+                    }
+                }
+            }
+            val bottomActions = listOf<Triple<String, Int, () -> Unit>>(
+                primaryBottomAction,
                 Triple("btn_apps", R.drawable.ic_apps) {
                     closeControlCenter {
                         openAllApps()
@@ -11676,7 +12097,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             R.string.section_screensaver to R.drawable.ic_screensaver, R.string.section_remote_home to R.drawable.ic_remote,
 
-            R.string.section_lock to R.drawable.ic_lock,
+            R.string.section_lock to R.drawable.ic_lock, R.string.section_profile to R.drawable.ic_home,
 
         )
 
@@ -11712,6 +12133,10 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
             R.string.default_launcher to R.string.help_default_launcher,
 
             R.string.setup_home to R.string.help_run_setup, R.string.section_keys to R.string.help_remote_keys,
+
+            R.string.section_profile to R.string.help_profile, R.string.profile_name to R.string.help_profile_name,
+
+            R.string.cc_quick_tile to R.string.help_cc_quick_tile, R.string.rerun_setup to R.string.help_rerun_setup,
 
         )
 
@@ -11751,7 +12176,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         const val PANEL_EDGE = 0x0FFFFFFF // white 6%, the settings panel's left edge
 
-        const val HELP_URL = "https://github.com/aradhyas8/Plume_Launcher#home-button-on-android-13-and-newer"
+        const val HELP_URL = "https://github.com/jigrdfsgrdgrd/Plume_Launcher#home-button-on-android-13-and-newer"
 
         const val TOGGLE_ON = "\u0000on" // row values drawn as a switch instead of text
 
@@ -11791,7 +12216,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         const val CHOSEN = "\u2713"
 
-        const val REPO = "aradhyas8/Plume_Launcher"
+        const val REPO = "jigrdfsgrdgrd/Plume_Launcher"
 
         const val UPDATE_STATUS = "dev.plume.UPDATE_STATUS"
 
@@ -11961,6 +12386,10 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
             "nintendoswitch" to R.drawable.logo_nintendoswitch,
 
             "appletv" to R.drawable.logo_appletv,
+
+            "pc" to R.drawable.ic_pc,
+
+            "receiver" to R.drawable.ic_receiver,
 
             "settop" to R.drawable.ic_settop,
 

@@ -174,7 +174,7 @@
                     android:background="@drawable/bg_now_playing_pill"
                     android:fontFamily="sans-serif-bold"
                     android:gravity="center"
-                    android:text="J"
+                    android:text="★"
                     android:textColor="#FFFFFF"
                     android:textSize="11sp" />
 
@@ -688,7 +688,7 @@
                     android:background="@drawable/bg_now_playing_pill"
                     android:fontFamily="sans-serif-bold"
                     android:gravity="center"
-                    android:text="J"
+                    android:text="★"
                     android:textColor="#FFFFFF"
                     android:textSize="19sp" />
 
@@ -704,7 +704,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:fontFamily="sans-serif-medium"
-                        android:text="Julius"
+                        android:text="@string/profile_default_name"
                         android:textColor="#FFFFFF"
                         android:textSize="16.5sp" />
 
@@ -714,7 +714,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:fontFamily="sans-serif"
-                        android:text="Apple TV 4K · Wohnzimmer"
+                        android:text="Android TV"
                         android:textColor="#8EA4C0"
                         android:textSize="11.5sp" />
                 </LinearLayout>
