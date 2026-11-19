@@ -886,6 +886,17 @@ class MainActivity : Activity() {
 
         }
 
+        applySeedIntent(intent)
+
+        val alreadyConfigured = prefs.getBoolean("onboarding_v1", false)
+            || prefs.contains("user_name")
+            || prefs.contains("order")
+            || prefs.getBoolean("apple_curated_v3", false)
+            || prefs.getBoolean("setup_shown", false)
+        if (alreadyConfigured && !prefs.getBoolean("onboarding_v1", false)) {
+            prefs.edit().putBoolean("onboarding_v1", true).apply()
+        }
+
         if (prefs.getBoolean("reopen_settings", false)) {
 
             prefs.edit().remove("reopen_settings").apply()
@@ -894,7 +905,7 @@ class MainActivity : Activity() {
 
         } else if (!prefs.getBoolean("onboarding_v1", false)) {
 
-            // First-run onboarding: let any user personalize name, HDMI quick-action, and Home button.
+            // First-run onboarding: only on genuinely fresh installs.
 
             prefs.edit().putBoolean("onboarding_v1", true).putBoolean("setup_shown", true).apply()
 
@@ -1517,14 +1528,16 @@ class MainActivity : Activity() {
 
         setupDialog?.let { setupDialog = null; it.dismiss() } // replaced, not closed: the dismiss listener leaves the flow alone
 
-        val card: LinearLayout = if (frosted()) glassSurface(dp(20).toFloat()) else LinearLayout(this).apply {
+        val card: LinearLayout = if (frosted()) glassSurface(dp(26).toFloat()) else LinearLayout(this).apply {
 
-            background = if (dark) rimCard(dp(16), false, solid = true) else GradientDrawable().apply {
-
-                cornerRadius = dp(16).toFloat()
-
-                setColor(0xFFF7F8FA.toInt())
-
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                if (!dark) intArrayOf(0xE6F5F7FA.toInt(), 0xF0E8ECF2.toInt())
+                else intArrayOf(0xC4383D48.toInt(), 0xD8181B22.toInt())
+            ).apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(26).toFloat()
+                setStroke(dp(1), if (!dark) 0x33000000 else 0x4DFFFFFF)
             }
 
         }
@@ -1565,7 +1578,7 @@ class MainActivity : Activity() {
 
             setLayout(dp(if (extra != null) 600 else 480), ViewGroup.LayoutParams.WRAP_CONTENT)
 
-            setDimAmount(if (frosted()) 0.35f else 0.6f) // glass shows what is behind, so it needs less dimming
+            setDimAmount(0.45f) // let wallpaper subtly shine through frosted setup cards
 
         }
 
@@ -1603,14 +1616,51 @@ class MainActivity : Activity() {
         updateHomeClockVisibility()
     }
 
+    private fun applySeedIntent(intent: Intent?) {
+        if (intent == null) return
+        var changed = false
+        val ed = prefs.edit()
+        intent.getStringExtra("seed_user_name")?.let { name ->
+            val cleaned = name.trim().take(24)
+            if (cleaned.isNotEmpty()) ed.putString("user_name", cleaned)
+            ed.putBoolean("onboarding_v1", true).putBoolean("setup_shown", true)
+            changed = true
+        }
+        for (p in 1..4) {
+            intent.getStringExtra("seed_hdmi$p")?.let { spec ->
+                val label = spec.substringBefore(":").trim()
+                val icon = spec.substringAfter(":", "auto").trim()
+                if (label.isNotEmpty()) ed.putString("hdmi_label_port_$p", label)
+                if (icon.isNotEmpty() && icon != "auto") ed.putString("hdmi_icon_port_$p", icon)
+                changed = true
+            }
+        }
+        intent.getStringExtra("seed_cc_quick_port")?.let { spec ->
+            val portNum = spec.substringBefore(":").trim()
+            val customLabel = spec.substringAfter(":", "").trim()
+            val match = hdmiInputs().firstOrNull { hdmiPortNum(it.pkg, it.label) == portNum }
+            ed.putString("cc_quick_mode", "input")
+            if (match != null) ed.putString("cc_quick_pkg", match.pkg)
+            if (customLabel.isNotEmpty()) ed.putString("cc_quick_label", customLabel)
+            changed = true
+        }
+        if (changed) {
+            ed.apply()
+            setupDialog?.dismiss()
+            sources = hdmiInputs()
+            updateHomeClockVisibility()
+            refreshApps()
+            renderApps()
+        }
+    }
+
     private fun startOnboardingWizard(fromSettings: Boolean = false) {
         val current = prefs.getString("user_name", "")?.trim().orEmpty()
         lateinit var field: EditText
         field = textField(current, getString(R.string.profile_name_hint), InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) { entered ->
             hideKeyboard(field)
             saveProfileName(entered)
-            if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
-            else finishOnboarding(fromSettings)
+            showOnboardingDockStep(fromSettings)
         }
         val box = (field.parent as LinearLayout).apply { setPadding(0, dp(14), 0, dp(4)) }
         homePopup(
@@ -1621,15 +1671,81 @@ class MainActivity : Activity() {
             getString(R.string.setup_continue) to {
                 hideKeyboard(field)
                 saveProfileName(field.text.toString())
-                if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
-                else finishOnboarding(fromSettings)
+                showOnboardingDockStep(fromSettings)
             },
             getString(R.string.setup_skip) to {
                 hideKeyboard(field)
+                showOnboardingDockStep(fromSettings)
+            },
+        )
+    }
+
+    private fun showOnboardingDockStep(fromSettings: Boolean = false) {
+        val listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, 0)
+        }
+        val stateLabel = { active: Boolean -> if (active) "✓ Im Dock" else "Aus" }
+        val addRow: (String, String, RowStyle?, (TextView?) -> Unit) -> Unit = { title, initialVal, style, onToggle ->
+            lateinit var rowView: View
+            rowView = settingsRow(title, initialVal, style = style) {
+                val valLabel = (rowView as? ViewGroup)?.let { vg ->
+                    (0 until vg.childCount).map { vg.getChildAt(it) }.filterIsInstance<TextView>().lastOrNull()
+                }
+                onToggle(valLabel)
+            }
+            listBox.addView(
+                rowView,
+                LinearLayout.LayoutParams(MATCH_PARENT, dp(42)).apply {
+                    if (listBox.childCount > 0) topMargin = dp(4)
+                }
+            )
+        }
+
+        sources.forEach { src ->
+            val portNum = hdmiPortNum(src.pkg, src.label)
+            val iconKey = prefs.getString("hdmi_icon_${src.pkg}", null)?.takeIf { it in HDMI_ICONS }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null)?.takeIf { s -> s in HDMI_ICONS } }
+                ?: hdmiIcon(src.label, true)
+            addRow("HDMI: ${src.label}", stateLabel(src.pkg in pinnedInputs()), RowStyle(icon = HDMI_ICONS[iconKey] ?: R.drawable.ic_hdmi)) { lbl ->
+                val cur = pinnedInputs()
+                val nowPinned = src.pkg !in cur
+                prefs.edit().putStringSet("inputs_pinned", if (nowPinned) cur + src.pkg else cur - src.pkg).apply()
+                lbl?.text = stateLabel(nowPinned)
+                renderApps()
+            }
+            addRow("↳ Symbol & Name (${src.label})", "Ändern ›", RowStyle(icon = R.drawable.ic_tune)) {
+                customizeHdmiInput(src) { showOnboardingDockStep(fromSettings) }
+            }
+        }
+
+        sortedApps().filter { !it.pkg.startsWith(HDMI) }.forEach { app ->
+            addRow(app.label, stateLabel(app.pkg !in rowHiddenSet()), null) { lbl ->
+                val cur = rowHiddenSet()
+                val nowShown = app.pkg in cur
+                prefs.edit().putStringSet("row_hidden", if (nowShown) cur - app.pkg else cur + app.pkg).apply()
+                lbl?.text = stateLabel(nowShown)
+                renderApps()
+            }
+        }
+
+        val scroll = android.widget.ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(250)).apply { topMargin = dp(10) }
+            addView(listBox)
+        }
+
+        homePopup(
+            0,
+            "Apps & Eingänge im Dock",
+            "Wähle aus, welche Apps und HDMI-Eingänge in der unteren Leiste angezeigt werden.",
+            scroll,
+            getString(R.string.setup_continue) to {
                 if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
                 else finishOnboarding(fromSettings)
             },
         )
+        listBox.getChildAt(0)?.requestFocus()
     }
 
     private fun pickUserName() {
@@ -1799,6 +1915,8 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
 
         super.onNewIntent(intent)
+
+        applySeedIntent(intent)
 
         intent.getStringExtra("set_wallpaper")?.let { wp ->
 
@@ -7046,6 +7164,16 @@ class MainActivity : Activity() {
 
      */
 
+    private fun hdmiPortNum(pkgOrPort: String, label: String = ""): String {
+        val port = pkgOrPort.removePrefix(HDMI)
+        val hwDigits = port.substringAfter("HW", "").filter { it.isDigit() }.toIntOrNull()
+        return if (hwDigits != null && hwDigits >= 15) {
+            (hwDigits - 14).toString()
+        } else {
+            label.filter { it.isDigit() }.ifEmpty { hwDigits?.toString().orEmpty() }
+        }
+    }
+
     private fun hdmiInputs(): List<App> = try {
 
         val tv = getSystemService(TvInputManager::class.java)
@@ -7066,15 +7194,19 @@ class MainActivity : Activity() {
 
             val label = (if (named) input.loadLabel(this) else input.loadCustomLabel(this) ?: input.loadLabel(this)).toString()
 
-            val hwDigits = port.substringAfter("HW", "").filter { it.isDigit() }.toIntOrNull()
+            val pkg = HDMI + port
 
-            val portNum = label.filter { it.isDigit() }.ifEmpty {
+            val portNum = hdmiPortNum(port, label)
 
-                if (hwDigits != null && hwDigits >= 15) (hwDigits - 14).toString() else hwDigits?.toString().orEmpty()
+            val customLabel = prefs.getString("hdmi_label_$pkg", null)?.trim()?.takeIf { it.isNotEmpty() }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_label_port_$it", null)?.trim()?.takeIf { s -> s.isNotEmpty() } }
 
-            }
+            val finalLabel = customLabel ?: label
 
-            val iconKey = hdmiIcon(label, named)
+            val customIconKey = prefs.getString("hdmi_icon_$pkg", null)?.takeIf { it in HDMI_ICONS }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null)?.takeIf { s -> s in HDMI_ICONS } }
+
+            val iconKey = customIconKey ?: hdmiIcon(finalLabel, named)
 
             val baseIcon = getDrawable(HDMI_ICONS[iconKey]!!)!!
 
@@ -7082,9 +7214,9 @@ class MainActivity : Activity() {
 
             App(
 
-                HDMI + port,
+                pkg,
 
-                label,
+                finalLabel,
 
                 Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(port)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
 
@@ -7104,7 +7236,7 @@ class MainActivity : Activity() {
 
     private fun numberedHdmiDrawable(base: Drawable, num: String): Drawable {
 
-        val size = dp(48)
+        val size = dp(96)
 
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
 
@@ -7114,15 +7246,13 @@ class MainActivity : Activity() {
 
         iconCopy.setTint(Color.WHITE)
 
-        val iconW = (size * 0.62f).toInt()
+        val iconSize = (size * 0.54f).toInt()
 
-        val iconH = (size * 0.42f).toInt()
+        val left = (size - iconSize) / 2
 
-        val left = (size - iconW) / 2
+        val top = (size * 0.04f).toInt()
 
-        val top = (size * 0.08f).toInt()
-
-        iconCopy.setBounds(left, top, left + iconW, top + iconH)
+        iconCopy.setBounds(left, top, left + iconSize, top + iconSize)
 
         iconCopy.draw(c)
 
@@ -7132,13 +7262,15 @@ class MainActivity : Activity() {
 
             textAlign = Paint.Align.CENTER
 
-            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
 
-            textSize = size * 0.34f
+            textSize = size * 0.22f
+
+            letterSpacing = 0.04f
 
         }
 
-        c.drawText(num, size / 2f, size * 0.86f, p)
+        c.drawText("HDMI $num", size / 2f, size * 0.86f, p)
 
         return BitmapDrawable(resources, bmp)
 
@@ -8265,6 +8397,12 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         holdMenu(v, listOfNotNull(
 
+            if (pkg.startsWith(HDMI)) "Symbol & Name ändern" to {
+                sources.firstOrNull { it.pkg == pkg }?.let { src ->
+                    customizeHdmiInput(src) { renderApps() }
+                }
+            } else null,
+
             getString(R.string.move) to { startEdit(grab = v, once = true) },
 
             "Apps im Dock verwalten" to { pickRowApps() },
@@ -8361,17 +8499,19 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
     private fun popupMenu(anchor: View, below: Boolean = false, rows: (dismiss: () -> Unit) -> List<View>) {
 
-        val list: LinearLayout = if (frosted()) glassSurface(dp(14).toFloat()) else LinearLayout(this).apply {
+        val list: LinearLayout = if (frosted()) glassSurface(dp(18).toFloat()) else LinearLayout(this).apply {
 
-            background = if (dark) rimCard(dp(12), false, solid = true) else GradientDrawable().apply {
-
-                cornerRadius = dp(12).toFloat()
-
-                setColor(0xFFF7F8FA.toInt())
-
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                if (!dark) intArrayOf(0xE6F5F7FA.toInt(), 0xF0E8ECF2.toInt())
+                else intArrayOf(0xCC383D48.toInt(), 0xE0181B22.toInt())
+            ).apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), if (!dark) 0x33000000 else 0x4DFFFFFF)
             }
 
-            elevation = if (dark) 0f else dp(8).toFloat()
+            elevation = dp(12).toFloat()
 
         }
 
@@ -8607,25 +8747,181 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
     private fun rowHiddenSet() = prefs.getStringSet("row_hidden", emptySet())!!
 
-    private fun pickRowApps() {
+    private fun pickRowApps(focus: Int = 0) {
 
         val fromDock = settingsScrim.visibility != View.VISIBLE
         if (fromDock) showPanel()
 
-        val list = sortedApps().filter { !it.pkg.startsWith(HDMI) } // inputs are pinned from the Sources list
+        val pinned = pinnedInputs()
+        val hidden = rowHiddenSet()
+        val appList = sortedApps().filter { !it.pkg.startsWith(HDMI) }
 
-        toggles(getString(R.string.apps_in_row), list.map { it.label to it.pkg }, "row_hidden", getString(R.string.shown), getString(R.string.hidden)) {
+        val rows = ArrayList<Triple<String, String, () -> Unit>>()
+        val styles = ArrayList<RowStyle?>()
 
+        sources.forEach { src ->
+            val myIdx = rows.size
+            val isPinned = src.pkg in pinned
+            rows += page("HDMI: ${src.label}", toggle(isPinned)) {
+                prefs.edit().putStringSet("inputs_pinned", if (isPinned) pinned - src.pkg else pinned + src.pkg).apply()
+                renderApps()
+                pickRowApps(myIdx)
+            }
+            styles += RowStyle(
+                icon = HDMI_ICONS[
+                    prefs.getString("hdmi_icon_${src.pkg}", null)
+                        ?: hdmiPortNum(src.pkg, src.label).takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null) }
+                        ?: hdmiIcon(src.label, true)
+                ] ?: R.drawable.ic_hdmi,
+                sub = if (isPinned) "Unten im Dock sichtbar" else "Nicht im Dock",
+                area = AREA_APPS
+            )
+        }
+
+        if (sources.isNotEmpty()) {
+            val myIdx = rows.size
+            rows += page("HDMI-Symbole & Namen anpassen", "›") {
+                customizeAllHdmiInputs { pickRowApps(myIdx) }
+            }
+            styles += RowStyle(icon = R.drawable.ic_tune, sub = "PC-, Receiver-, Konsolen- oder HDMI-Icon wählen", area = AREA_APPS)
+        }
+
+        appList.forEach { a ->
+            val myIdx = rows.size
+            val isShown = a.pkg !in hidden
+            rows += page(a.label, toggle(isShown)) {
+                prefs.edit().putStringSet("row_hidden", if (isShown) hidden + a.pkg else hidden - a.pkg).apply()
+                renderApps()
+                pickRowApps(myIdx)
+            }
+            styles += null
+        }
+
+        showPage(
+            getString(R.string.apps_in_row),
+            rows,
+            focus = focus.coerceIn(0, (rows.size - 1).coerceAtLeast(0)),
+            styles = styles
+        ) {
             renderApps()
-
             if (fromDock) {
                 closeLauncherSettings()
             } else {
                 renderSettings(R.string.apps_in_row)
             }
-
         }
 
+    }
+
+    private fun customizeAllHdmiInputs(onReturn: () -> Unit) {
+        if (sources.isEmpty()) return onReturn()
+        if (settingsScrim.visibility != View.VISIBLE) showPanel()
+        val rows = sources.map { src ->
+            page(src.label, "Symbol & Name ›") {
+                customizeHdmiInput(src) { customizeAllHdmiInputs(onReturn) }
+            }
+        }
+        val styles = sources.map { src ->
+            val portNum = hdmiPortNum(src.pkg, src.label)
+            val iconKey = prefs.getString("hdmi_icon_${src.pkg}", null)?.takeIf { it in HDMI_ICONS }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null)?.takeIf { s -> s in HDMI_ICONS } }
+                ?: hdmiIcon(src.label, true)
+            RowStyle(icon = HDMI_ICONS[iconKey] ?: R.drawable.ic_hdmi, area = AREA_APPS)
+        }
+        showPage("HDMI-Eingänge anpassen", rows, styles = styles, back = onReturn)
+    }
+
+    private fun customizeHdmiInput(src: App, onReturn: () -> Unit) {
+        val portNum = hdmiPortNum(src.pkg, src.label)
+        val curLabel = prefs.getString("hdmi_label_${src.pkg}", null)
+            ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_label_port_$it", null) }
+            ?: src.label
+        val curIcon = prefs.getString("hdmi_icon_${src.pkg}", null)
+            ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null) }
+            ?: "auto"
+
+        lateinit var field: EditText
+        val saveAndFinish: (String) -> Unit = { chosenIcon ->
+            hideKeyboard(field)
+            val typed = field.text.toString().trim()
+            val ed = prefs.edit()
+            if (typed.isEmpty()) {
+                ed.remove("hdmi_label_${src.pkg}")
+                if (portNum.isNotEmpty()) ed.remove("hdmi_label_port_$portNum")
+            } else {
+                ed.putString("hdmi_label_${src.pkg}", typed)
+                if (portNum.isNotEmpty()) ed.putString("hdmi_label_port_$portNum", typed)
+            }
+            if (chosenIcon == "auto") {
+                ed.remove("hdmi_icon_${src.pkg}")
+                if (portNum.isNotEmpty()) ed.remove("hdmi_icon_port_$portNum")
+            } else {
+                ed.putString("hdmi_icon_${src.pkg}", chosenIcon)
+                if (portNum.isNotEmpty()) ed.putString("hdmi_icon_port_$portNum", chosenIcon)
+            }
+            ed.apply()
+            sources = hdmiInputs()
+            refreshApps()
+            renderApps()
+            setupDialog?.dismiss()
+            onReturn()
+        }
+
+        field = textField(curLabel, "Name eingeben (z. B. PC, Receiver, PS5)", InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) {
+            saveAndFinish(curIcon)
+        }
+
+        val iconChoices = listOf(
+            Triple("auto", "Automatisch (nach Name)", R.drawable.ic_auto),
+            Triple("pc", "PC / Computer", R.drawable.ic_pc),
+            Triple("receiver", "AV-Receiver / Soundanlage", R.drawable.ic_receiver),
+            Triple("playstation", "PlayStation", R.drawable.logo_playstation),
+            Triple("xbox", "Xbox", R.drawable.logo_xbox),
+            Triple("nintendoswitch", "Nintendo Switch", R.drawable.logo_nintendoswitch),
+            Triple("appletv", "Apple TV", R.drawable.logo_appletv),
+            Triple("settop", "TV-Box / Kabel-Receiver", R.drawable.ic_settop),
+            Triple("playback", "Mediaplayer / Blu-ray", R.drawable.ic_playback),
+            Triple("hdmi", "Standard HDMI-Stecker", R.drawable.ic_hdmi),
+        )
+
+        val listBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            for ((idx, item) in iconChoices.withIndex()) {
+                val (key, title, resId) = item
+                val isSelected = curIcon == key
+                addView(
+                    settingsRow(title, if (isSelected) CHOSEN else "", style = RowStyle(icon = resId)) {
+                        saveAndFinish(key)
+                    },
+                    LinearLayout.LayoutParams(MATCH_PARENT, dp(42)).apply { if (idx > 0) topMargin = dp(4) }
+                )
+            }
+        }
+        val scroll = android.widget.ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(220)).apply { topMargin = dp(10) }
+            addView(listBox)
+        }
+        val extraBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, 0)
+            addView(field.parent as View)
+            addView(scroll)
+        }
+
+        homePopup(
+            0,
+            src.label,
+            "Gib einen Namen ein und wähle das passende Icon für diesen HDMI-Eingang.",
+            extraBox,
+            getString(R.string.setup_save) to { saveAndFinish(curIcon) },
+            getString(android.R.string.cancel) to {
+                hideKeyboard(field)
+                setupDialog?.dismiss()
+                onReturn()
+            }
+        )
+        listBox.getChildAt(iconChoices.indexOfFirst { it.first == curIcon }.coerceAtLeast(0))?.requestFocus()
     }
 
     /** A page of on/off rows saved as the set of keys that are off; [done] runs on Back. */
@@ -9670,7 +9966,10 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
             } else {
                 getString(R.string.cc_input_sub)
             }
-            val iconKey = hdmiIcon("$customLabel ${target.label}", named = true)
+            val portNum = hdmiPortNum(target.pkg, target.label)
+            val savedIcon = prefs.getString("hdmi_icon_${target.pkg}", null)?.takeIf { it in HDMI_ICONS }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null)?.takeIf { s -> s in HDMI_ICONS } }
+            val iconKey = savedIcon ?: hdmiIcon("$customLabel ${target.label}", named = true)
             val iconRes = HDMI_ICONS[iconKey] ?: R.drawable.ic_sources
             CcTile(title, sub, iconRes, accentTint = null) {
                 closeControlCenter { launch(target) }
@@ -10813,13 +11112,18 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             setPadding(dp(14), 0, dp(14), 0)
 
-            background = GradientDrawable().apply {
-
-                cornerRadius = dp(8).toFloat()
-
-                setStroke(dp(1), Color.argb(80, Color.red(fg), Color.green(fg), Color.blue(fg)))
-
+            fun fieldBg(focused: Boolean) = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(if (dark) (if (focused) 0x38FFFFFF else 0x22FFFFFF) else (if (focused) 0x22000000 else 0x12000000))
+                setStroke(
+                    if (focused) dp(2) else 1,
+                    if (dark) (if (focused) Color.WHITE else 0x40FFFFFF) else (if (focused) 0xFF111214.toInt() else 0x26000000)
+                )
             }
+
+            background = fieldBg(false)
+
+            setOnFocusChangeListener { _, focused -> background = fieldBg(focused) }
 
             setOnEditorActionListener { v, _, _ -> done(v.text.toString().trim()); true }
 
