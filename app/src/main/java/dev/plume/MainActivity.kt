@@ -1685,7 +1685,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(4), 0, 0)
         }
-        val stateLabel = { active: Boolean -> if (active) "✓ Im Dock" else "Aus" }
+        val stateLabel = { active: Boolean -> if (active) getString(R.string.in_dock_checked) else getString(R.string.off) }
         val addRow: (String, String, RowStyle?, (TextView?) -> Unit) -> Unit = { title, initialVal, style, onToggle ->
             lateinit var rowView: View
             rowView = settingsRow(title, initialVal, style = style) {
@@ -1714,7 +1714,7 @@ class MainActivity : Activity() {
                 lbl?.text = stateLabel(nowPinned)
                 renderApps()
             }
-            addRow("↳ Symbol & Name (${src.label})", "Ändern ›", RowStyle(icon = R.drawable.ic_tune)) {
+            addRow("↳ ${getString(R.string.hdmi_customize_row)} (${src.label})", "›", RowStyle(icon = R.drawable.ic_tune)) {
                 customizeHdmiInput(src) { showOnboardingDockStep(fromSettings) }
             }
         }
@@ -1737,8 +1737,8 @@ class MainActivity : Activity() {
 
         homePopup(
             0,
-            "Apps & Eingänge im Dock",
-            "Wähle aus, welche Apps und HDMI-Eingänge in der unteren Leiste angezeigt werden.",
+            getString(R.string.dock_step_title),
+            getString(R.string.dock_step_body),
             scroll,
             getString(R.string.setup_continue) to {
                 if (sources.isNotEmpty()) pickQuickCcTile(fromOnboarding = true, fromSettings = fromSettings)
@@ -8397,7 +8397,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         holdMenu(v, listOfNotNull(
 
-            if (pkg.startsWith(HDMI)) "Symbol & Name ändern" to {
+            if (pkg.startsWith(HDMI)) getString(R.string.hdmi_customize_row) to {
                 sources.firstOrNull { it.pkg == pkg }?.let { src ->
                     customizeHdmiInput(src) { renderApps() }
                 }
@@ -8565,52 +8565,53 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
     /** The TV's inputs under the Sources icon, as on any TV: the logo of what is plugged in, its name, no signal if none. */
 
-    private fun showSources(anchor: View) {
-
+    private fun showSources(anchor: View = appRow) {
         if (sources.isEmpty()) return
+        if (settingsScrim.visibility != View.VISIBLE) showPanel()
+        val pinned = pinnedInputs()
+        val rows = ArrayList<Triple<String, String, () -> Unit>>()
+        val styles = ArrayList<RowStyle?>()
 
-        popupMenu(anchor, below = true) { dismiss ->
-
-            val pinned = pinnedInputs()
-
-            sources.sortedBy { it.label.lowercase() }.map { src ->
-
-                val state = listOfNotNull(
-
-                    if (src.offline) getString(R.string.no_signal) else null,
-
-                    if (src.pkg in pinned) getString(R.string.in_row) else null,
-
-                ).joinToString("  ·  ")
-
-                settingsRow(src.label, state) { dismiss(); launch(src) }.also { row ->
-
-                    (row as LinearLayout).addView(ImageView(this).apply {
-
-                        setImageDrawable(src.icon)
-
-                        setColorFilter(if (dark) DARK_TEXT_2 else fg)
-
-                    }, 0, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(12) })
-
-                    row.setOnLongClickListener { dismiss(); unlock { togglePin(src) }; true } // hold OK: in or out of the home row
-
-                }
-
-            } + label(getString(R.string.sources_hint), 12f).apply {
-
-                secondary(0.6f)
-
-                setPadding(dp(14), dp(8), dp(14), dp(4))
-
-                isSingleLine = false // short, and it wraps rather than widen the list
-
-                maxWidth = dp(180)
-
+        sources.forEach { src ->
+            val state = when {
+                !src.offline && src.pkg in pinned -> getString(R.string.in_row)
+                src.pkg in pinned -> getString(R.string.in_row)
+                src.offline -> getString(R.string.no_signal)
+                else -> getString(R.string.on)
             }
-
+            rows += page(src.label, state) {
+                closeLauncherSettings()
+                launch(src)
+            }
+            val portNum = hdmiPortNum(src.pkg, src.label)
+            val iconKey = prefs.getString("hdmi_icon_${src.pkg}", null)?.takeIf { it in HDMI_ICONS }
+                ?: portNum.takeIf { it.isNotEmpty() }?.let { prefs.getString("hdmi_icon_port_$it", null)?.takeIf { s -> s in HDMI_ICONS } }
+                ?: hdmiIcon(src.label, true)
+            styles += RowStyle(
+                icon = HDMI_ICONS[iconKey] ?: R.drawable.ic_hdmi,
+                sub = if (src.offline) getString(R.string.no_signal) else getString(R.string.cc_input_sub),
+                area = AREA_APPS
+            )
         }
 
+        rows += page(getString(R.string.hdmi_customize_all), "›") {
+            customizeAllHdmiInputs { showSources(anchor) }
+        }
+        styles += RowStyle(icon = R.drawable.ic_tune, sub = getString(R.string.hdmi_customize_sub), area = AREA_APPS)
+
+        rows += page(getString(R.string.apps_in_row), "›") {
+            pickRowApps()
+        }
+        styles += RowStyle(icon = R.drawable.ic_apps, sub = getString(R.string.sources_hint), area = AREA_APPS)
+
+        showPage(
+            getString(R.string.sources),
+            rows,
+            styles = styles,
+            crumb = getString(R.string.plume_settings)
+        ) {
+            closeLauncherSettings()
+        }
     }
 
     private fun appTileCount() = appRow.childCount
@@ -8780,10 +8781,10 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         if (sources.isNotEmpty()) {
             val myIdx = rows.size
-            rows += page("HDMI-Symbole & Namen anpassen", "›") {
+            rows += page(getString(R.string.hdmi_customize_all), "›") {
                 customizeAllHdmiInputs { pickRowApps(myIdx) }
             }
-            styles += RowStyle(icon = R.drawable.ic_tune, sub = "PC-, Receiver-, Konsolen- oder HDMI-Icon wählen", area = AREA_APPS)
+            styles += RowStyle(icon = R.drawable.ic_tune, sub = getString(R.string.hdmi_customize_sub), area = AREA_APPS)
         }
 
         appList.forEach { a ->
@@ -8828,7 +8829,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                 ?: hdmiIcon(src.label, true)
             RowStyle(icon = HDMI_ICONS[iconKey] ?: R.drawable.ic_hdmi, area = AREA_APPS)
         }
-        showPage("HDMI-Eingänge anpassen", rows, styles = styles, back = onReturn)
+        showPage(getString(R.string.hdmi_customize_title), rows, styles = styles, back = onReturn)
     }
 
     private fun customizeHdmiInput(src: App, onReturn: () -> Unit) {
@@ -8867,7 +8868,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
             onReturn()
         }
 
-        field = textField(curLabel, "Name eingeben (z. B. PC, Receiver, PS5)", InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) {
+        field = textField(curLabel, getString(R.string.hdmi_name_hint), InputType.TYPE_TEXT_FLAG_CAP_WORDS, EditorInfo.IME_ACTION_DONE) {
             saveAndFinish(curIcon)
         }
 
@@ -8912,7 +8913,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         homePopup(
             0,
             src.label,
-            "Gib einen Namen ein und wähle das passende Icon für diesen HDMI-Eingang.",
+            getString(R.string.hdmi_customize_body),
             extraBox,
             getString(R.string.setup_save) to { saveAndFinish(curIcon) },
             getString(android.R.string.cancel) to {
@@ -9026,41 +9027,57 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         val pm = packageManager
 
-        val gtvIcon = try {
+        val hasGtv = try {
 
-            pm.getApplicationIcon(gtvPkg)
+            pm.getPackageInfo(gtvPkg, 0)
+
+            true
 
         } catch (_: Exception) {
 
-            try {
-
-                getDrawable(R.drawable.logo_googleplay)!!
-
-            } catch (_: Exception) {
-
-                getDrawable(R.drawable.ic_settings)!!
-
-            }
+            false
 
         }
 
         allAppsCachedList.clear()
 
-        allAppsCachedList.add(
+        if (hasGtv) {
 
-            App(
+            val gtvIcon = try {
 
-                gtvPkg,
+                pm.getApplicationIcon(gtvPkg)
 
-                "Google TV",
+            } catch (_: Exception) {
 
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(gtvPkg),
+                try {
 
-                gtvIcon
+                    getDrawable(R.drawable.logo_googleplay)!!
+
+                } catch (_: Exception) {
+
+                    getDrawable(R.drawable.ic_settings)!!
+
+                }
+
+            }
+
+            allAppsCachedList.add(
+
+                App(
+
+                    gtvPkg,
+
+                    "Google TV",
+
+                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(gtvPkg),
+
+                    gtvIcon
+
+                )
 
             )
 
-        )
+        }
 
         allAppsCachedList.addAll(sortedApps().filter { it.pkg != gtvPkg })
 
@@ -9722,7 +9739,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                 if (level in 1..100) {
                     cachedRemoteBattery = level
                     if (findViewById<View>(R.id.controlCenterScrim)?.visibility == View.VISIBLE) {
-                        renderControlCenterTiles("Fernbedienung")
+                        renderControlCenterTiles(getString(R.string.cc_remote))
                     }
                 }
             }
@@ -9819,7 +9836,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                             prefs.edit().putInt("cached_remote_battery", pct).apply()
                             runOnUiThread {
                                 if (findViewById<View>(R.id.controlCenterScrim)?.visibility == View.VISIBLE) {
-                                    renderControlCenterTiles("Fernbedienung")
+                                    renderControlCenterTiles(getString(R.string.cc_remote))
                                 }
                             }
                         }
@@ -9914,7 +9931,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
             val net = cm?.activeNetwork
             val caps = net?.let { cm.getNetworkCapabilities(it) }
             when {
-                caps == null -> "Getrennt"
+                caps == null -> getString(R.string.cc_disconnected)
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
                     val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
@@ -9922,12 +9939,12 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                     val rawSsid = wm?.connectionInfo?.ssid?.trim('"')?.takeIf {
                         it.isNotBlank() && !it.equals("<unknown ssid>", ignoreCase = true)
                     }
-                    rawSsid ?: "Verbunden"
+                    rawSsid ?: getString(R.string.cc_connected)
                 }
-                else -> "Verbunden"
+                else -> getString(R.string.cc_connected)
             }
         } catch (_: Exception) {
-            "Verbunden"
+            getString(R.string.cc_connected)
         }
     }
 
@@ -9935,9 +9952,9 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         return try {
             val bm = getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
             val adapter = bm?.adapter
-            if (adapter?.isEnabled == true) "Ein" else "Aus"
+            if (adapter?.isEnabled == true) getString(R.string.on) else getString(R.string.off)
         } catch (_: Exception) {
-            "Ein"
+            getString(R.string.on)
         }
     }
 
@@ -9991,7 +10008,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         val wifiSub = getWifiStatusSubtitle()
         val btSub = getBluetoothStatusSubtitle()
         val freeBytes = availableStorageBytes(aerials4KDir())
-        val storageSub = "${formatStorageSize(freeBytes)} frei"
+        val storageSub = getString(R.string.cc_free_fmt, formatStorageSize(freeBytes))
         val storageTint = when {
             freeBytes < 350_000_000L -> 0xFFFF453A.toInt()
             freeBytes < 750_000_000L -> 0xFFFF9F0A.toInt()
@@ -10006,15 +10023,16 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
         } ?: "Studio"
 
         val remoteBattery = getRemoteBatteryLevel()
-        val remoteSub = if (remoteBattery != null) "$remoteBattery%" else "Verbunden"
+        val remoteSub = if (remoteBattery != null) "$remoteBattery%" else getString(R.string.cc_connected)
         val remoteTint = when {
             remoteBattery != null && remoteBattery <= 20 -> 0xFFFF453A.toInt()
             remoteBattery != null && remoteBattery <= 40 -> 0xFFFF9F0A.toInt()
             else -> null
         }
 
+        val remoteTitle = getString(R.string.cc_remote)
         val cards = listOf(
-            CcTile("WLAN", wifiSub, R.drawable.ic_wifi, accentTint = null) {
+            CcTile(getString(R.string.cc_wifi), wifiSub, R.drawable.ic_wifi, accentTint = null) {
                 try {
                     startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: Exception) {
@@ -10033,26 +10051,26 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
                 }
             },
             resolveQuickCcTile(),
-            CcTile("Hintergründe", wpSub, R.drawable.ic_wallpaper, accentTint = null) {
+            CcTile(getString(R.string.cc_wallpapers), wpSub, R.drawable.ic_wallpaper, accentTint = null) {
                 closeControlCenter {
                     openWallpaperStudio(fromSettings = false)
                 }
             },
-            CcTile("Speicher", storageSub, R.drawable.ic_memory, accentTint = storageTint) {
+            CcTile(getString(R.string.cc_storage), storageSub, R.drawable.ic_memory, accentTint = storageTint) {
                 closeControlCenter {
                     openStorageAndWallpapersManager(fromSettings = false) {
                         closeLauncherSettings()
                     }
                 }
             },
-            CcTile("Fernbedienung", remoteSub, R.drawable.ic_siri_remote, accentTint = remoteTint) {
+            CcTile(remoteTitle, remoteSub, R.drawable.ic_siri_remote, accentTint = remoteTint) {
                 try {
                     startActivity(Intent("com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: Exception) {
                     try {
                         startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     } catch (_: Exception) {
-                        toast("Fernbedienung: $remoteSub")
+                        toast("$remoteTitle: $remoteSub")
                     }
                 }
             },
@@ -10334,21 +10352,21 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
             box.setWillNotDraw(true)
 
-            box.background = GradientDrawable().apply {
-
-                cornerRadius = dp(24).toFloat()
-
-                setColor(if (dark) 0xF0181A20.toInt() else 0xF0F5F7FA.toInt())
-
-                setStroke(dp(1), if (dark) 0x33FFFFFF else 0x33000000)
-
+            box.background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                if (!dark) intArrayOf(0xE6F5F7FA.toInt(), 0xF0E8ECF2.toInt())
+                else intArrayOf(0xC4383D48.toInt(), 0xD8181B22.toInt())
+            ).apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(26).toFloat()
+                setStroke(dp(1), if (!dark) 0x33000000 else 0x4DFFFFFF)
             }
 
         }
 
-        val city = prefs.getString("geo_city", "Aktueller Standort") ?: "Aktueller Standort"
+        val city = prefs.getString("geo_city", getString(R.string.your_area)) ?: getString(R.string.your_area)
 
-        findViewById<TextView>(R.id.weatherModalCity)?.text = "\uD83D\uDCCD $city"
+        findViewById<TextView>(R.id.weatherModalCity)?.text = city
 
         val code = prefs.getInt("wx_code", 0)
 
@@ -10376,11 +10394,11 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         val badges = listOf(
 
-            "\uD83C\uDF21\uFE0F Gefühlt" to "$feels°",
+            getString(R.string.wx_feels_like) to "$feels°",
 
-            "\uD83D\uDCA7 Luftfeuchte" to "$humidity%",
+            getString(R.string.wx_humidity) to "$humidity%",
 
-            "\uD83D\uDCA8 Wind" to "$wind km/h"
+            getString(R.string.wx_wind) to "$wind km/h"
 
         )
 
@@ -10440,7 +10458,7 @@ private fun tile(label: String?, icon: Drawable, mono: Boolean, tag: String, wor
 
         }
 
-        findViewById<TextView>(R.id.weatherModalRange)?.text = "Tagesbereich: Min $tempMin°  ·  Max $tempMax°"
+        findViewById<TextView>(R.id.weatherModalRange)?.text = getString(R.string.wx_range_fmt, tempMin, tempMax)
 
         scrim.alpha = 0f
 

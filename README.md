@@ -15,13 +15,17 @@ Stock Android TV launchers are full of ads, sponsored carousels, and visual clut
 ### Floating Control Center
 * Replaces the stock Android TV quick settings with a floating frosted glass pill panel in the top-right corner.
 * **Remote Battery Level**: Queries the TV remote's battery percentage directly over Bluetooth LE GATT (`0000180F` Battery Service) so you actually see the battery percentage (e.g. `88%`).
-* **One-Click HDMI / PC Tile**: Instant shortcut to switch directly to your PC input (HDMI 1).
-* **Network & Audio**: Fast toggles for Wi-Fi, Bluetooth, and audio output.
-* **Smart Dock Movement**: The app dock smoothly pushes down when the control center opens so elements never overlap.
+* **Customizable HDMI / Quick Action Tile**: Configure your preferred HDMI port (with custom label and icon such as PC, AV Receiver, PlayStation, Xbox, Switch, or Apple TV), open the full HDMI Sources drawer, or trigger 4K Aerial screensavers.
+* **Live Storage & Wallpaper Manager**: Shows available internal storage at a glance and opens the storage drawer to manage or delete downloaded 4K Aerial videos and custom wallpapers.
+* **Network & Bluetooth**: Fast access to Wi-Fi and Bluetooth accessories, while the app dock smoothly pushes down so elements never overlap.
 
 <p align="center">
   <img src="screenshots/control_center.png" alt="Apple TV Floating Control Center" width="95%">
 </p>
+
+### First-Run Setup & Custom HDMI Icons
+* **Interactive Onboarding**: Fresh installs open translucent frosted-glass cards to set your profile initial next to the clock, pick which apps and HDMI inputs appear in the dock, and choose your Control Center shortcut (all skipped automatically on app updates).
+* **Custom HDMI Icons & Names**: Long-press any HDMI dock tile or open the Sources / Apps drawer to rename ports and pick crisp monochrome icons (`PC`, `AV Receiver`, `PlayStation`, `Xbox`, `Nintendo Switch`, `Apple TV`, or 1:1 `HDMI` badges).
 
 ### Categorized App Library
 * Fullscreen translucent app drawer with category filter pills (**Alle**, **Streaming**, **Musik**, **Spiele**, **Tools**).

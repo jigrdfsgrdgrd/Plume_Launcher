@@ -37,7 +37,8 @@ Put changes that are not released under `## Unreleased`. Rename that heading to 
 ## 1.6
 
 - **First-run setup.** Plume asks for your profile name, dock apps & HDMI inputs, and Control Center shortcut on first launch in translucent glass cards — without re-prompting on app updates.
-- **Custom HDMI icons & crisp badges.** Long-press any HDMI tile or visit **Plume settings → Apps row** to customize its icon (PC, AV Receiver, console, etc.) and label, with unstretched 1:1 HDMI port badges.
+- **Full German & English UI.** Translated all settings, Control Center tiles, HDMI pickers, and weather dialogs with no mixed-language menus.
+- **Custom HDMI icons & glass Sources drawer.** Long-press any HDMI tile or open Sources / **Plume settings → Apps row** to customize icons and names in a translucent glass drawer with 1:1 badges.
 - **Control Center storage manager.** Replaces the Audio tile with live free storage space and direct management to delete downloaded 4K Aerials or custom wallpapers.
 - **Custom Control Center shortcut.** Pick any HDMI input with an optional custom name, open the full HDMI list, or launch Aerial screensavers directly from Control Center.
 - **No device hardcodes.** Removed pre-configured profile initials and HDMI port names so Plume adapts cleanly to any Smart TV or streaming box out of the box.
